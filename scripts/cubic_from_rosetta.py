@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # coding=utf-8
+"""
+cubic_from_rosetta.py script
+@Author: Mads Jeppesen
+@Date: 4/6/22
+"""
 from assemblies.assemblies import AssemblyParser
 import pathlib
 import textwrap

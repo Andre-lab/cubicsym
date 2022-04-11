@@ -17,6 +17,7 @@ from Bio.PDB.Polypeptide import is_aa
 from string import ascii_lowercase, ascii_uppercase
 from cubicsym.mathfunctions import rotation_matrix, vector_angle
 from cubicsym.cubicassembly import CubicSymmetricAssembly
+from cubicsym.exceptions import NoSymmetryDetected
 from symmetryhandler.symmetryhandler import SymmetrySetup
 # pyrosetta -> to use from_asymmetric_output
 from pyrosetta import pose_from_file
@@ -26,11 +27,12 @@ from pyrosetta.rosetta.std import istringstream
 from pyrosetta.rosetta.core.conformation.symmetry import SymmData
 from pyrosetta.rosetta.std import ostringstream
 from pyrosetta import init
+from pathlib import Path
 
-class AssemblyParser():
+class AssemblyParser:
     """Parses different formats to an assembly."""
     def __init__(self):
-        pass
+        self.parser = MMCIFParser()
 
     def from_pose(cls, pose, name=""):
         return CubicSymmetricAssembly(name)
@@ -99,7 +101,7 @@ class AssemblyParser():
         chain_ids = list(ascii_uppercase) + list(ascii_lowercase) + [str(i) for i in range(0, 5000)]
 
         # this is to get the chains_ids to match the output from Rosetta. Only works for chain a 60-mer!:
-        for letter1, letter2 in zip(["J", "F", "G", "d", "Z", "a"],["I", "J", "K", "F", "G", "H"]):
+        for letter1, letter2 in zip(["J", "F", "G", "d", "Z", "a"], ["I", "J", "K", "F", "G", "H"]):
             pos1 = chain_ids.index(letter1)
             pos2 = chain_ids.index(letter2)
             chain_ids[pos1] = letter2
@@ -246,7 +248,7 @@ class AssemblyParser():
         return rm_list, tv_list
 
     def _reconstruct(self, mmcif_dict, model, canonical=True):
-        """
+        """Reconstructs the model.
         Modifies:
          - Chain names so that the label_asym_id are used instead of the author ones
          - Removes all non-protein AA (option available to only pick canonical).
@@ -315,90 +317,12 @@ class AssemblyParser():
 
         return new_model
 
-    # TODO: THE USE AUTHOR CHAINS CAN BE AUTOMATIC BY COMPARING THE AUTHOR CHAINS TO LABELS CHAINS TO THE ASYM CHAINS SPECIFIED IN struct_asym lines
-    def from_rcsb_cif_file(self, file):
-        """
-        Initialize from an RCSB cif file
+    def cubic_assembly_from_cif(self, file, symmetry):
+        """Constructs a cubic assembly from an mmcif file.
 
-        :param file:
-        :return:
-        """
+        :param file: File to construct from.
+        :param symmetry: Symmetry type to use. Either I, O or T."""
         start_time = time.time()
-        # initialize a parser and read in the cif structure and pick a model (0 in this case)
-        pick = 0
-        parser = MMCIFParser()
-        structure_name = file.split("/")[-1].split(".")[0]
-        structure = parser.get_structure(structure_name, file)
-        model = structure[pick]  # only work with the first model (handles NMR in this case)
-        mmcif_dict = MMCIF2Dict(file)
-
-        # which Assembly to pick - I'm assumeming now that the biggest one is always first (always what we want)
-        assembly_id = mmcif_dict["_pdbx_struct_assembly.id"][pick]
-        assembly_details = mmcif_dict["_pdbx_struct_assembly.details"][pick]
-        print("Generating assembly: id=" + assembly_id + " type='" + assembly_details + "'")
-
-        # reconstruct the model so the chain names are easier to handle
-        model = self._reconstruct(mmcif_dict, model)
-
-        # fetch chains to apply apply_symmetry_to generate the assembly
-        chain_to_apply_symmetry_to = [chain for chain in mmcif_dict["_pdbx_struct_assembly_gen.asym_id_list"][pick].split(",") if model.has_id(chain)]
-
-        # retrieve symmetry operations
-        rotations, translations = self._get_symmetry_operations(pick, mmcif_dict)
-
-        # create a subunit list outer: [] is the subunits, inner: [] is the chains of the different subunits.
-        asymmetric_chains = {}
-        subunits = []
-        for asym_chain,number in list(zip(mmcif_dict["_struct_asym.id"], mmcif_dict["_struct_asym.entity_id"])):
-            if not model.has_id(asym_chain):
-                continue
-            if not number in asymmetric_chains:
-                asymmetric_chains[number] = []
-            asymmetric_chains[number].append(asym_chain)
-        asymmetric_chains = sorted([chains for number, chains in asymmetric_chains.items()], key=len)
-        # four cases cases:
-        # 1: [(1, ["A", "B", "C"])] - subunit with 1 chain where all other chains are asymmetric partners of that one. example: 1stm
-        # 2: [(1, ["A", "B"]), 2: ["C", "D"])] subunit with many chains but each division have equal length
-        # 3: [(1, ["A"]), 2: ["C", "D"])] subunit with many chains but each division does NOT have equal length: example: 3j17
-        # 4: [(1, ["A", "B", "C"])] - similar to #1 but you want to include all the asymmetrical chains in the subunit: example: 1m1c
-        # if 1 or 2:
-        if all([len(chains) == len(asymmetric_chains[0]) for chains in asymmetric_chains]) and len(rotations) * len(asymmetric_chains[0]) == 60:
-
-            # 1
-            if len(asymmetric_chains) == 1:
-                subunits = [[chain] for chain in asymmetric_chains[0]]
-            # 2
-            else:
-                subunits = [list(chains) for chains in zip(*asymmetric_chains)]
-        # if 3 or 4
-        else:
-            subunits = [[chain for chains in asymmetric_chains for chain in chains]]
-
-        # chain name and subunit number specifiers
-        chain_ids = iter(list(ascii_uppercase) + list(ascii_lowercase) + [str(i) for i in range(0, 10000)])
-
-        assembly = CubicSymmetricAssembly(structure_name + "_assembly")
-        subunit_number = 0
-
-        if len(rotations) == 0 and len(translations) == 0:
-            print("file contains full assembly")
-            assert(1 == 2) # just fail here!
-        for symmetry_operation_number, (r, t) in enumerate(zip(rotations, translations), 1):
-            print("applying symmetry operation " + str(symmetry_operation_number) + "/" + str(len(rotations)))
-            for chains in subunits:
-                subunit_number += 1
-                subunit = Bio.PDB.Model.Model(f"{subunit_number}")
-                for chain in chains:
-                    for model_chain in model.get_chains():
-                        if model_chain.id == chain:
-                            new_chain = model_chain.copy()
-                            # new_chain.transform(r,t) - problem is that it right multiplies!
-                            for atom in new_chain.get_atoms():
-                                atom.coord = np.dot(r, atom.coord) + t
-                            new_chain.id = next(chain_ids)
-                            subunit.add(new_chain)
-                assembly.add(subunit)
-
+        cubicassembly = CubicSymmetricAssembly(file, symmetry)
         print("Created the assembly in: " + str(round(time.time() - start_time, 1)) + "s")
-
-        return assembly
+        return cubicassembly
