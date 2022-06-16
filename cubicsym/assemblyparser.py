@@ -17,6 +17,7 @@ from Bio.PDB.Polypeptide import is_aa
 from string import ascii_lowercase, ascii_uppercase
 from cubicsym.mathfunctions import rotation_matrix, vector_angle
 from cubicsym.cubicassembly import CubicSymmetricAssembly
+from cubicsym.assembly import Assembly
 from cubicsym.exceptions import NoSymmetryDetected
 from symmetryhandler.symmetryhandler import SymmetrySetup
 # pyrosetta -> to use from_asymmetric_output
@@ -35,7 +36,7 @@ class AssemblyParser:
         self.parser = MMCIFParser()
 
     def from_pose(cls, pose, name=""):
-        return CubicSymmetricAssembly(name)
+        return CubicSymmetricAssembly(name, )
 
     def create_symmetric_pose_from_asymmetric_output(self, file: str, return_symmetry_file=False):
         init("-initialize_rigid_body_dofs true -pdb_comments")
@@ -68,30 +69,34 @@ class AssemblyParser:
         pose.dump_pdb(buffer)
         return self.from_symmetric_output_pdb_and_symmetry_file(StringIO(buffer.str()), StringIO(symmetry_file), assembly_name=file)
 
-    def from_symmetric_output_pdb_and_symmetry_file(cls, pdb, symmetry_file, assembly_name=None):
+    def from_symmetric_output_pdb_and_symmetry_file(cls, file, symmetry_file, assembly_name=None):
         """
+        The algorithm is as follows:
+         1. Generate the 2 fold from the chain A
+         2. generate 5-fold (five subunits) from master subunit
+         3. generate 5-fold (five sununits) from the subunit that is part of the 2-fold axis with the master subunit.
+            and rotate the latter five subunit 5-fold  72*5 degrees. Now we have half a capsid.
+         4. rotate the half capsid 180 degrees at specific point along the middle.
         # todo: other than icosahedral structures in the future
         # todo: Have to rewrite for multichain systems.
-        :param pdb:
+        :param file:
         :param symmetry_file:
         :return:
         """
 
-        # The algorithm is as follows:
-        #
-        # 1. Generate the 2 fold from the chain A
-        # 2. generate 5-fold (five subunits) from master subunit
-        # 3. generate 5-fold (five sununits) from the subunit that is part of the 2-fold axis with the master subunit.
-        #    and rotate the latter five subunit 5-fold  72*5 degrees. Now we have half a capsid.
-        # 4. rotate the half capsid 180 degrees at specific point along the middle.
 
         # read symmetry from file
         setup = SymmetrySetup()
         setup.read_from_file(symmetry_file)
 
         # read rosetta pdb file from file
-        p = PDBParser(PERMISSIVE=1)
-        structure = p.get_structure(pdb, pdb)
+        fsuffix = Path(file).suffix
+        assert fsuffix in (".cif", ".pdb"), f"File has to have either extension '.cif' of '.pdb' not {fsuffix}"
+        if fsuffix == ".cif":
+            p = MMCIFParser()
+        else:
+            p = PDBParser(PERMISSIVE=1)
+        structure = p.get_structure(file, file)
         global_z = setup.get_vrt_name("VRTglobal")._vrt_z
 
         # Variable that will contain all chains of the assembly
@@ -110,12 +115,12 @@ class AssemblyParser:
 
         # The 3 5-fold axes availble for an icosahedral structure in the symmetry file
         # minus because rosetta is awesome and have turned the coordinate systems arounD
-        z15 = -setup.get_vrt_name("VRT5fold")._vrt_z
+        z15 = -setup.get_vrt_name("VRTHFfold")._vrt_z
         z25 = -setup.get_vrt_name("VRT2fold")._vrt_z
         z35 = -setup.get_vrt_name("VRT3fold")._vrt_z
 
         # construct assembly
-        assembly = CubicSymmetricAssembly(f"{assembly_name if assembly_name else pdb}")
+        assembly = Assembly()
 
         # count the chains in the structure
         n_chains = len(list(structure.get_chains())) # number_of_chains(pdb)
@@ -190,7 +195,7 @@ class AssemblyParser:
 
         if len(structure.get_list()) % 60 == 0:
             print("Structure is icosahedral")
-            assembly = CubicSymmetricAssembly(structure_name + "_assembly")
+            assembly = CubicSymmetricAssembly(structure_name + "_assembly", )
             # chains_in_subunit = len(unique_chain_names) // 60
             # print("Subunits consists of", chains_in_subunit)
             # for subunit_number, chains in enumerate([[chain for chain in list(structure.get_chains())[i:i+i*chains_in_subunit]] for i in range(0, 60*chains_in_subunit, chains_in_subunit)],1):

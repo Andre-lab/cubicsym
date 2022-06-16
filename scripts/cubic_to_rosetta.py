@@ -6,24 +6,24 @@ cubic_to_rosetta.py script
 @Date: 4/6/22
 """
 import importlib
-import traceback
 import requests
 import numpy as np
 import gzip
-from Bio.PDB import Superimposer
-from cubicsym.assemblyparser import AssemblyParser
+from cubicsym.cubicassembly import CubicSymmetricAssembly
 from cubicsym.exceptions import ToHighGeometry, ToHighRMSD
 from pathlib import Path
 from cubicsym.utilities import mpi_starmap, write_string_to_bytearray
 from mpi4py import MPI
 from pyrosetta import pose_from_file, init
 from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
+from symmetryhandler.symmetryhandler import SymmetrySetup
+import pandas as pd
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-def quality_assurance(rosetta_repr, ico_repr, input_file, symm_file, pdbid, assembly_id, output_alignment=False):
+def quality_assurance(rosetta_repr, full_repr, input_file, symm_file, pdbid, assembly_id, idealize, output_alignment=False):
     from Bio.PDB.MMCIFParser import MMCIFParser
     from Bio.PDB.PDBParser import PDBParser
     from io import StringIO
@@ -31,23 +31,25 @@ def quality_assurance(rosetta_repr, ico_repr, input_file, symm_file, pdbid, asse
     from Bio.PDB.vectors import Vector
     from pyrosetta.rosetta.core.conformation.symmetry import residue_center_of_mass
 
-    # Create the ico and rosetta repr structures
+    # Create the full and rosetta repr structures
     pdb_parser, cif_parser = PDBParser(), MMCIFParser()
     print(f"constructing the rosetta_repr structure from {rosetta_repr}")
     rosetta_repr_struct = pdb_parser.get_structure(pdbid + "_rosetta", rosetta_repr)
-    print(f"constructing the ico_repr structure from {ico_repr}")
-    ico_repr_struct = cif_parser.get_structure(pdbid + "_ico", ico_repr)
+    print(f"constructing the full_repr structure from {full_repr}")
+    full_repr_struct = cif_parser.get_structure(pdbid + "_full", full_repr)
 
-    # TEST 1: Assert we have the capsid at the center and in the same time assure that it is symemtrical. If symmetrical all vectors should
-    # add up to zero as well. Theres bound to be some inaccuracies that come from:
+    # TEST 1: Assert we have the capsid at the center and in the same time assure that it is symmetrical. If symmetrical all vectors should
+    # add up to zero as well. There's bound to be some inaccuracies that come from:
     #   1. The cif file stores 3 decimals but get_vector() stores 2.
     #   2. The original RCSB asymmetric unit can give rise to inaccuracies in the vectors z15, z25 and z35 (vectors to the fivefolds), so
     #      these are not placed exactly symmetrical
-    allowed = 3
+    allowed = 1
     tot = Vector(0,0,0)
-    for v in [a.get_vector() for a in ico_repr_struct.get_atoms()]:
+    atoms = [a.get_vector() for a in full_repr_struct.get_atoms() if a.name == "CA"]
+    for v in atoms:
         tot += v
-    assert all(abs(i) < allowed for i in tot)
+    tot = tot / len(atoms)
+    assert all(abs(i) < allowed for i in tot / len(atoms)), f"The full representation is not centered, the center is: {tot}"
 
     # TEST 2: Assert that the master protein lies along the x-axis with the Rosetta residue COM CA atom on this axis.
     init("-symmetry:initialize_rigid_body_dofs true -detect_disulf false -out:file:output_pose_energies_table false")
@@ -58,234 +60,146 @@ def quality_assurance(rosetta_repr, ico_repr, input_file, symm_file, pdbid, asse
     SetupForSymmetryMover(symm_file).apply(pose)
     assert np.isclose(pose.residue(resi).atom("CA").xyz()[1], 0, atol=1e-3), f"{rosetta_repr} does not have COM along the x-axis"
 
-    # TEST 3: Check that the rmsd of the same chains between the rosetta_repr and ico_repr structure is small
+    # TEST 3: Check that the rmsd of the same chains between the rosetta_repr and full_repr structure is small
     # Allow a distance difference of 0.01 per ca atom
-    allowed = 0.01
+    allowed = 1
     rosetta_repr_chains = [chain.id for chain in rosetta_repr_struct.get_chains()]
     rosetta_repr_atoms = {c.id: [a for a in c.get_atoms() if a.name == "CA"] for c in rosetta_repr_struct.get_chains()}
-    ico_repr_atoms = {c.id: [a for a in c.get_atoms() if a.name == "CA"] for c in ico_repr_struct.get_chains() if c.id in rosetta_repr_chains}
+    full_repr_atoms = {c.id: [a for a in c.get_atoms() if a.name == "CA"] for c in full_repr_struct.get_chains() if c.id in rosetta_repr_chains}
     for chain in rosetta_repr_atoms:
         # check same length
-        str_id = f"chain {chain} of rosetta_repr ({rosetta_repr}) and ico_repr ({ico_repr})"
-        assert len(rosetta_repr_atoms[chain]) == len(ico_repr_atoms[chain]), f"{str_id} have unequal length"
+        str_id = f"chain {chain} of rosetta_repr ({rosetta_repr}) and full_repr ({full_repr})"
+        assert len(rosetta_repr_atoms[chain]) == len(full_repr_atoms[chain]), f"{str_id} have unequal length"
         diff = 0
-        for atom_repr, atom_ico in zip(rosetta_repr_atoms[chain], ico_repr_atoms[chain]):
-            diff += (atom_repr.get_vector() - atom_ico.get_vector()).norm()
+        for atom_repr, atom_full in zip(rosetta_repr_atoms[chain], full_repr_atoms[chain]):
+            diff += (atom_repr.get_vector() - atom_full.get_vector()).norm()
         diff /= len(rosetta_repr_atoms[chain])
         assert diff <= allowed, f"The allowed distance differential {allowed} was crossed with {diff} for {str_id}"
 
-    # TEST 4: The capsid is identical to the assembly deposited in the pdb
-    url = "https://files.rcsb.org/pub/pdb/data/biounit/{}/all/"
-    connect_timeout, read_timeout = 5, 10
-    print(f"Retrieving assembly {assembly_id} for {pdbid}.")
-    try: # first try pdb
-        filename = f"{pdbid}.pdb{assembly_id}.gz".lower()
-        response = requests.get(url.format("PDB") + f"/{filename}")
-        if response.status_code == 200:
-            r = gzip.decompress(response.content).decode()
-            rcsb_struct = pdb_parser.get_structure(pdbid, StringIO(r))
-        else: # try cif if pdb is not found
-            filename = f"{pdbid}-assembly{assembly_id}.cif.gz"
-            response = requests.get(url.format("mmCIF") + f"/{filename}")
-            r = gzip.decompress(response.content).decode()
-            rcsb_struct = cif_parser.get_structure(pdbid, StringIO(r))
-            if not response.status_code == 200:
-                response.raise_for_status()
-    except requests.exceptions.Timeout as e:
-        raise SystemExit(e.strerror + f"\nCheck if the website is reachable...")
-    except requests.exceptions.RequestException as e:
-        raise SystemExit(e)
-    assert rcsb_struct, "rcsb file was not created."
-    # align to rosetta_repr to the biological assembly
-    rcsb_struct_atoms = [a for a in rcsb_struct.get_atoms() if a.name == "CA"]
-    # rosetta_repr_atoms = [a for a in rosetta_repr_struct.get_atoms() if a.name == "CA"]
-    ico_repr_atoms = [a for a in ico_repr_struct.get_atoms() if a.name == "CA"]
-    # alignment
-    super_imposer = Superimposer()
-    super_imposer.set_atoms(rcsb_struct_atoms, ico_repr_atoms)
-    super_imposer.apply(ico_repr_struct.get_atoms())
-    # output_the_aligned_structure + the rcsb_structrure
-    if output_alignment:
-        parent = Path(ico_repr).parent
-        io = MMCIFIO()
-        io.set_structure(ico_repr_struct)
-        io.save(str(parent.joinpath(Path(ico_repr).stem + "_aligned.cif")))
-        io.set_structure(rcsb_struct)
-        io.save(str(parent.joinpath(pdbid + "_aligned_reference.cif")))
+    # TEST 4: The capsid is identical to the assembly deposited in the pdb. This should not be done if the symmetry was idealized
+    # since there in that case could be discrepancies
+    if not idealize:
+        url = "https://files.rcsb.org/pub/pdb/data/biounit/{}/all/"
+        connect_timeout, read_timeout = 5, 10
+        print(f"Retrieving assembly {assembly_id} for {pdbid}.")
+        try: # first try pdb
+            filename = f"{pdbid}.pdb{assembly_id}.gz".lower()
+            response = requests.get(url.format("PDB") + f"/{filename}")
+            if response.status_code == 200:
+                r = gzip.decompress(response.content).decode()
+                rcsb_struct = pdb_parser.get_structure(pdbid, StringIO(r))
+            else: # try cif if pdb is not found
+                filename = f"{pdbid}-assembly{assembly_id}.cif.gz"
+                response = requests.get(url.format("mmCIF") + f"/{filename}")
+                r = gzip.decompress(response.content).decode()
+                rcsb_struct = cif_parser.get_structure(pdbid, StringIO(r))
+                if not response.status_code == 200:
+                    response.raise_for_status()
+        except requests.exceptions.Timeout as e:
+            raise SystemExit(e.strerror + f"\nCheck if the website is reachable...")
+        except requests.exceptions.RequestException as e:
+            raise SystemExit(e)
+        assert rcsb_struct, "rcsb file was not created."
+        # align to rosetta_repr to the biological assembly
+        rcsb_struct_atoms = [a for a in rcsb_struct.get_atoms() if a.name == "CA"]
+        # rosetta_repr_atoms = [a for a in rosetta_repr_struct.get_atoms() if a.name == "CA"]
+        full_repr_atoms = [a for a in full_repr_struct.get_atoms() if a.name == "CA"]
+        # alignment
+        super_imposer = Superimposer()
+        super_imposer.set_atoms(rcsb_struct_atoms, full_repr_atoms)
+        super_imposer.apply(full_repr_struct.get_atoms())
+        # output_the_aligned_structure + the rcsb_structrure
+        if output_alignment:
+            parent = Path(full_repr).parent
+            io = MMCIFIO()
+            io.set_structure(full_repr_struct)
+            io.save(str(parent.joinpath(Path(full_repr).stem + "_aligned.cif")))
+            io.set_structure(rcsb_struct)
+            io.save(str(parent.joinpath(pdbid + "_aligned_reference.cif")))
 
-
-    # Ultimate test:
-    # 1. Assert that you get the output (pdb and symm) and no errors occurs.
-    # 2. Output the capsid and the rosetta_repr (write code for that) with a flag. Get the biological assembly (with the same number)
-    #    that was used to generate the assembly and then check that the alignment of the capsid and the rosetta_repr is good!
-    # 3. Make sure the capsid is pointing in the correct direction and is centered. So measure the center of the capsid -> should be [0,0,0] and
-    # measure the x-direction!
-
-def output_rosetta_repr(symmetry_out_name, input_out_name, rosetta_repr_name, rosetta_repr_outpath, overwrite):
-    """Outputs the Rosetta representation pdb."""
-    # check first if we can do it.
-    rosetta_out_name = Path(rosetta_repr_outpath).joinpath(rosetta_repr_name)
-    if rosetta_out_name.exists() and not overwrite:
-        print(f"Skips making {rosetta_out_name} because this file already exist. "
-              f"Pass --overwrite to overwrite files.")
-        return
-    if not importlib.util.find_spec("pyrosetta"):
-        print(f"To ouput the Rosetta representation of {rosetta_out_name}, pyrosetta needs to be installed.")
-        return
-
-    init("-symmetry:initialize_rigid_body_dofs true "
-         "-detect_disulf false "
-         "-out:file:output_pose_energies_table false")
-    pose = pose_from_file(str(input_out_name))
-    symmetrize = SetupForSymmetryMover(str(symmetry_out_name))
-    symmetrize.apply(pose)
-    pose.dump_pdb(str(rosetta_out_name))
-
-def output_symmetry_visualization_script(symdef_out_name, symmetry_visualization_name, symmetry_visualization_outpath, overwrite):
-    """Outputs the symmetry_visualization script to be run in PyMOL."""
-    # check first that we can do it
-    script_out_name = Path(symmetry_visualization_outpath).joinpath(symmetry_visualization_name)
-    if script_out_name.exists() and not overwrite:
-        print(f"Skips making {script_out_name} because this file already exist. "
-              f"Pass --overwrite to overwrite files.")
-        return
-    if not importlib.util.find_spec("symmetryhandler"):
-        print(f"To ouput the Rosetta representation of {script_out_name} symmetryhandler needs to be installed.")
-        return
-
-    # now do it
-    from symmetryhandler.symmetryhandler import SymmetrySetup
-    setup = SymmetrySetup()
-    setup.read_from_file(str(symdef_out_name))
-    setup.print_visualization(str(script_out_name))
-
-def make_capsid_symmetry(structure, symmetry, overwrite, symdef_name, symdef_outpath, input_name, input_outpath,
-                         rosetta_repr_on, rosetta_repr_name, rosetta_repr_outpath, ico_on, ico_name, ico_outpath,
-                         symmetry_visualization_on, symmetry_visualization_name, symmetry_visualization_outpath, quality_assurance_on):
-    """Makes a capid symdef and Rosetta input file and optionally the icosahedral structure, the Rosetta representation
-    structure or a symmetry visualization script."""
-
-    print(f"Constructs symmetry for {structure} ")
-
-    # preprocess names
-    stem = Path(structure).stem
-    symdef_name = symdef_name if symdef_name != "<prefix>.symm" else f"{stem}.symm"
-    input_name = input_name if input_name != "<prefix>.cif" else f"{stem}.cif"
-    rosetta_repr_name = rosetta_repr_name if rosetta_repr_name != "<prefix>_repr.pdb" else f"{stem}_repr.pdb"
-    ico_name = ico_name if ico_name != "<prefix>_ico.cif" else f"{stem}_ico.cif"
-    symmetry_visualization_name = symmetry_visualization_name if symmetry_visualization_name != "<prefix>_symmetry_visualization.py" else f"{stem}_symmetry_visualization.py"
-
-    succeded = True
-    try:
-        parser = AssemblyParser()
-        ico = parser.cubic_assembly_from_cif(structure, symmetry)
+def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_outpath, input_names, input_outpath,
+                        rosetta_repr, rosetta_repr_names, rosetta_repr_outpath, full_repr, full_repr_names, full_repr_outpath,
+                        symmetry_visualization, symmetry_visualization_names, symmetry_visualization_outpath, quality_assurance_on,
+                        idealize, report, report_outpath, report_names):
+    """Makes a cubic symdef and Rosetta input file and optionally the full cubic structure, the Rosetta representation
+    structure and a symmetry visualization script."""
+    for structure, symdef_name, input_name, rosetta_repr_name, full_repr_name, symvis_name, report_name in zip(structures, symdef_names, input_names,
+                                                                        rosetta_repr_names, full_repr_names, symmetry_visualization_names,
+                                                                                                               report_names):
+        print(f"Constructs symmetry for {structure} ")
+        results = {"succeded": False,
+                   "failure_reason": "",
+                   "file": structure,
+                   "symdef_name": Path(symdef_outpath).joinpath(symdef_name),
+                   "input_name": Path(input_outpath).joinpath(input_name),
+                   "rosetta_repr_name":  Path(rosetta_repr_outpath).joinpath(rosetta_repr_name),
+                   "full_repr_name": Path(full_repr_outpath).joinpath(full_repr_name),
+                   "symvis_name": Path(symmetry_visualization_outpath).joinpath(symvis_name),
+                   "quality_assurance_checked": quality_assurance_on,
+                   "quality_error": "",
+                   "quality_ok": False,
+                   "idealized": idealize,
+                   "chains": None,
+                   "residues": None,
+                   "size": None}
         try:
-            # setup symmetry and output the symdef file as well as the output file.
-            symdef_out_name = Path(symdef_outpath).joinpath(symdef_name)
-            input_out_name = Path(input_outpath).joinpath(input_name)
-            if (symdef_out_name.exists() and input_out_name.exists()) and not overwrite:
-                print(f"Skips making {symdef_out_name} and {input_out_name} because these files already exist. "
-                      f"Pass --overwrite to overwrite files.")
+            full = CubicSymmetricAssembly(mmcif_file=structure, mmcif_symmetry=symmetry)
+            # Make the symmetry file and input file
+            if (results.get("symdef_name").exists() and results.get("input_name").exists()) and not overwrite:
+                print(f"Skips making {results.get('symdef_name')} and {results.get('input_name')} because these files already exists. Pass --overwrite to overwrite files.")
             else:
-                ico.output_rosetta_symmetry(str(symdef_out_name), str(input_out_name))
-            # output the rosetta representation if set
-            if rosetta_repr_on:
-                output_rosetta_repr(symdef_out_name, input_out_name, rosetta_repr_name, rosetta_repr_outpath, overwrite)
-            # output the icosahedral structure if set.
-            ico_name_temp = Path(ico_outpath).joinpath(ico_name)
-            if ico_on:
-                if ico_name_temp.exists() and not overwrite:
-                    print(f"Skips making {ico_name_temp} because this file already exist. "
-                          f"Pass --overwrite to overwrite files.")
+                full.output_rosetta_symmetry(str(results.get("symdef_name")), str(results.get("input_name")), idealize=idealize)
+            # Make the Rosetta repr file
+            if rosetta_repr:
+                if results.get("rosetta_repr_name").exists() and not overwrite:
+                    print(f"Skips making  and {results.get('input_name')} because these file already exist.Pass --overwrite to overwrite files.")
                 else:
-                    ico.output(str(ico_name_temp))
-            if symmetry_visualization_on:
-                output_symmetry_visualization_script(symdef_out_name, symmetry_visualization_name, symmetry_visualization_outpath, overwrite)
-        except ToHighRMSD:
-            succeded = False
-        except ToHighGeometry:
-            # TODO: Deal with this in the future, now it just fails.
-            traceback.print_exc()
-            print(f"Failed with structure: {input_name}")
-            comm.Abort()
-            return
-    except:
-        traceback.print_exc()
-        print(f"Failed with structure: {input_name}")
-        comm.Abort()
-
-    # prefixed set:
-    full_input_outpath = str(Path(input_outpath).joinpath(input_name))# + ".cif"))
-    full_symdef_outpath = str(Path(symdef_outpath).joinpath(symdef_name))# + ".symm"))
-    full_rosetta_repr_outpath = str(Path(rosetta_repr_outpath).joinpath(rosetta_repr_name))# + ".pdb"))
-    full_ico_outpath = str(Path(ico_outpath).joinpath(ico_name))# + ".cif"))
-    full_symmetry_visualization_outpath = str(Path(symmetry_visualization_outpath).joinpath(symmetry_visualization_name))
-
-    if quality_assurance_on:
-        print("Running quality assurance checks")
-        quality_assurance(full_rosetta_repr_outpath, full_ico_outpath, full_input_outpath, full_symdef_outpath, pdbid=stem, assembly_id=1)
-
-    return [succeded, Path(input_name).stem, full_input_outpath, full_symdef_outpath, full_rosetta_repr_outpath, full_ico_outpath, full_symmetry_visualization_outpath, ico]
-
-def submain(structures, symmetry, overwrite, symdef_names, symdef_outpath, input_names, input_outpath,
-            rosetta_repr_on, rosetta_repr_names, rosetta_repr_outpath,
-            ico_on, ico_names, ico_outpath,
-            symmetry_visualization_on, symmetry_visualization_names, symmetry_visualization_outpath,
-            report_on, report_output_path, quality_assurance):
-
-    # process the names here -> make them lists if they arent!
-    if type(symdef_names) != list:
-        symdef_names = [symdef_names]
-    if type(input_names) != list:
-        input_names = [input_names]
-    if type(rosetta_repr_names) != list:
-        rosetta_repr_names = [rosetta_repr_names]
-    if type(ico_names) != list:
-        ico_names = [ico_names]
-    if type(symmetry_visualization_names) != list:
-        symmetry_visualization_names = [symmetry_visualization_names]
-
-    arguments = (
-        structures, [symmetry], [overwrite],
-        symdef_names, [symdef_outpath],
-        input_names, [input_outpath],
-        [rosetta_repr_on], rosetta_repr_names, [rosetta_repr_outpath],
-        [ico_on], ico_names, [ico_outpath],
-        [symmetry_visualization_on], symmetry_visualization_names, [symmetry_visualization_outpath], [quality_assurance])
-        #[report_on], [report_output_path])
-
-    results = mpi_starmap(make_capsid_symmetry, comm, *arguments)
-
-    # report stuff
-    if report_on:
-        report_output_path = str(Path(report_output_path).joinpath("metadata.csv"))
-        if comm.Get_rank() == 0:
-            print("Making a report")
-            if overwrite:
-                Path(report_output_path).open("w")
-            if overwrite or not Path(report_output_path).exists():
-                with Path(report_output_path).open("w") as f:
-                    header = ",".join(["stem", "succeded","chains", "residues", "size(Å)",
-                              "lowest_3fold_rmsd", "highest_3fold_accepted_rmsd", "lowest_5fold_rmsd", "highest_5fold_accepted_rmsd",
-                              "input_paths", "symmdef_paths", "rosetta_repr_paths", "ico_paths", "symmetry_visualization_paths"])
-                    f.write(header + "\n")
-            comm.Barrier()
+                    init("-symmetry:initialize_rigid_body_dofs true -detect_disulf false -out:file:output_pose_energies_table false")
+                    pose = pose_from_file(str(results.get("input_name")))
+                    symmetrize = SetupForSymmetryMover(str(results.get("symdef_name")))
+                    symmetrize.apply(pose)
+                    pose.dump_pdb(str(results.get("rosetta_repr_name")))
+            # Make the full repr file
+            if full_repr:
+                if results.get("full_repr_name").exists() and not overwrite:
+                    print(f"Skips making {results.get('full_repr_name')} because this file already exist. Pass --overwrite to overwrite files.")
+                else:
+                    full.output(str(results.get("full_repr_name")))
+            # Make the visualization script
+            if symmetry_visualization:
+                if results.get("symvis_name").exists() and not overwrite:
+                    print(
+                        f"Skips making {results.get('full_repr_name')} because this file already exist. Pass --overwrite to overwrite files.")
+                else:
+                    setup = SymmetrySetup()
+                    setup.read_from_file(str(results.get("symdef_name")))
+                    setup.print_visualization(str(results.get("symvis_name")))
+            results["succeded"] = True
+        except ToHighRMSD as e:
+            results["failure_reason"] = e.message
+        except ToHighGeometry as e:
+            results["failure_reason"] = e.message
+        except Exception as e:
+            results["failure_reason"] = e
+        if results.get("succeded"):
+            if quality_assurance_on:
+                print("Running quality assurance checks")
+                pdbid = Path(results.get("input_name")).stem
+                try:
+                    quality_assurance(str(results.get("rosetta_repr_name")), str(results.get("full_repr_name")), str(results.get("input_name")),
+                                      str(results.get("symdef_name")), pdbid=pdbid, assembly_id=1, idealize=idealize)
+                    results["quality_ok"] = True
+                except AssertionError as e:
+                    results["quality_error"] = e
+            results["chains"] = full.get_n_chains()
+            results["residues"] = full.get_n_residues()
+            results["size"] = full.get_size()
+        if report:
+            pd.DataFrame({k: [v] for k, v in results.items()}).to_csv(Path(report_outpath).joinpath(report_name), index=False)
         else:
-            comm.Barrier()
-        amode = MPI.MODE_WRONLY | MPI.MODE_CREATE | MPI.MODE_APPEND
-        fh = MPI.File.Open(comm, str(report_output_path), amode)
-        for succeded, stem, input_path, symddef_path, rosetta_repr_path, ico_path, symmetry_visualization_path, ico in results:
-            chains = ico.get_n_chains()
-            residues = ico.get_n_residues()
-            size = ico.get_size()
-            lowest_3fold_rmsd = round(ico.lowest_3fold_rmsd, 5) if ico.lowest_3fold_rmsd else None
-            highest_3fold_accepted_rmsd = round(ico.highest_3fold_accepted_rmsd, 5) if ico.highest_3fold_accepted_rmsd else None
-            lowest_5fold_rmsd = round(ico.lowest_5fold_rmsd, 5) if ico.lowest_5fold_rmsd else None
-            highest_5fold_accepted_rmsd = round(ico.highest_5fold_accepted_rmsd, 5) if ico.highest_5fold_accepted_rmsd else None
-            line = map(str, [stem, succeded, chains, residues, size, lowest_3fold_rmsd, highest_3fold_accepted_rmsd,
-                    lowest_5fold_rmsd, highest_5fold_accepted_rmsd, input_path, symddef_path, rosetta_repr_path,
-                    ico_path, symmetry_visualization_path])
-            fh.Write_shared(write_string_to_bytearray(",".join(line) + "\n"))
+            print(f"Structure {'succeded' if results.get('succeded') else 'failed'} with the following results:")
+            for k, v in results.items():
+                print(f"{k}:", "v")
 
 def main():
     import argparse
@@ -301,38 +215,63 @@ def main():
     # overwrite
     parser.add_argument('--overwrite', help="To overwrite the files (and if set, the report), or not", action="store_true")
     # on/off for output
-    parser.add_argument('--rosetta_repr_on', help="Output the structure that is represented with the symmetryfile.", action="store_true")
-    parser.add_argument('--ico_on', help="Output the corresponding cubic structure.", action="store_true")
-    parser.add_argument('--symmetry_visualization_on', help="ouputs a symmetry visualization script that can be used in pymol.", action="store_true")
-    parser.add_argument('--report_on', help="Output a report file that reports symmetry information", action="store_true")
+    parser.add_argument('--rosetta_repr', help="Output the structure that is represented with the symmetryfile.", default=False, type=bool)
+    parser.add_argument('--full_repr', help="Output the corresponding cubic structure.", default=False, type=bool)
+    parser.add_argument('--symmetry_visualization', help="ouputs a symmetry visualization script that can be used in pymol.",  default=False, type=bool)
+    parser.add_argument('--report', help="Output a report file that reports symmetry information", default=False, type=bool)
     # output paths
     parser.add_argument('--symdef_outpath', help="Path to the directory of where to output the symdef files.", default=".", type=str)
     parser.add_argument('--input_outpath', help="Path to the directory of where to output the Rosetta input pdb files.", default=".", type=str)
     parser.add_argument('--rosetta_repr_outpath', help="Path to the directory of where to output files set with '--rosetta_repr_on' ", default=".", type=str)
-    parser.add_argument('--ico_outpath', help="Path to the directory of where to output files set with '--ico_on'", default=".", type=str)
+    parser.add_argument('--full_repr_outpath', help="Path to the directory of where to output files set with '--full_repr_on'", default=".", type=str)
     parser.add_argument('--symmetry_visualization_outpath', help="Path to the directory of where to output files set with '--symmetry_visualization_on'", default=".", type=str)
     parser.add_argument('--report_outpath', help="Path to the directory of where to output the report.", default=".", type=str)
     # output names
     parser.add_argument('--symdef_names', help="Names given to the symmetry files.", default='<prefix>.symm', nargs="+", type=str)
     parser.add_argument('--input_names', help="Name given to input files.", default='<prefix>.cif', nargs="+", type=str)
-    parser.add_argument('--rosetta_repr_names', help="Names given to icosahedral files.", default='<prefix>_repr.pdb', nargs="+", type=str)
-    parser.add_argument('--ico_names', help="Names given to icosahedral files.", default='<prefix>_ico.cif', nargs="+", type=str)
-    parser.add_argument('--symmetry_visualization_names', help="Names given to icosahedral files.", default='<prefix>_symmetry_visualization.py', nargs="+", type=str)
-    # quality assurance
+    parser.add_argument('--rosetta_repr_names', help="Names given to Rosetta representation files.", default='<prefix>_rosetta.pdb', nargs="+", type=str)
+    parser.add_argument('--full_repr_names', help="Names given to full representation files.", default='<prefix>_full.cif', nargs="+", type=str)
+    parser.add_argument('--symmetry_visualization_names', help="Names given to symmetry visualization files.", default='<prefix>_symmetry_visualization.py', nargs="+", type=str)
+    parser.add_argument('--report_names', help="Names given to report files.", default='<prefix>.csv', nargs="+", type=str)
+    # other options
     parser.add_argument('--quality_assurance', help="Will run a quality assurance check to see that the outputs of the script is in "
                                                     "accordance with the actual cubic structure present in the RCSB along with other things."
                                                     " To run this, internet access is needed and the stem of the filename (like 1stm in 1stm.cif)"
-                                                    " needs to present in the RCSB.", action="store_true")
+                                                    " needs to present in the RCSB.", default=False, type=bool)
+    parser.add_argument('--idealize', help="To idealize the symmetry", default=True, type=bool)
     # parse the arguments.
     args = parser.parse_args()
 
-    submain(args.structures, args.symmetry, args.overwrite,
-            args.symdef_names, args.symdef_outpath,
-            args.input_names, args.input_outpath,
-            args.rosetta_repr_on, args.rosetta_repr_names, args.rosetta_repr_outpath,
-            args.ico_on, args.ico_names, args.ico_outpath,
-            args.symmetry_visualization_on, args.symmetry_visualization_names, args.symmetry_visualization_outpath,
-            args.report_on, args.report_outpath, args.quality_assurance)
+    # default name handling
+    if rank == 0:
+        args.symdef_names = [n if n != "<prefix>.symm" else f"{Path(s).stem}.symm" for n, s in zip([args.symdef_names] * len(args.structures) if isinstance(args.symdef_names, str) else args.symdef_names, args.structures)]
+        args.input_names = [n if n != "<prefix>.cif" else f"{Path(s).stem}.cif" for n, s in zip([args.input_names] * len(args.structures) if isinstance(args.input_names, str) else args.input_names, args.structures)]
+        args.rosetta_repr_names = [n if n != "<prefix>_rosetta.pdb" else f"{Path(s).stem}_rosetta.pdb" for n, s in zip([args.rosetta_repr_names] * len(args.structures) if isinstance(args.rosetta_repr_names, str) else args.rosetta_repr_names, args.structures)]
+        args.full_repr_names = [n if n != "<prefix>_full.cif" else f"{Path(s).stem}_full.cif" for n, s in zip([args.full_repr_names] * len(args.structures) if isinstance(args.full_repr_names, str) else args.full_repr_names, args.structures)]
+        args.symmetry_visualization_names = [n if n != '<prefix>_symmetry_visualization.py' else f"{Path(s).stem}_symmetry_visualization.py" for n, s in zip([args.symmetry_visualization_names] * len(args.structures) if isinstance(args.symmetry_visualization_names, str) else args.symmetry_visualization_names, args.structures)]
+        args.report_names = [n if n != "<prefix>.csv" else f"{Path(s).stem}.csv" for n, s in zip([args.report_names] * len(args.structures) if isinstance(args.report_names, str) else args.report_names, args.structures)]
+
+    # divide the options
+    if rank == 0:
+        args.structures = np.array_split(args.structures, size)
+        args.symdef_names = np.array_split(args.symdef_names, size)
+        args.input_names = np.array_split(args.input_names, size)
+        args.rosetta_repr_names = np.array_split(args.rosetta_repr_names, size)
+        args.full_repr_names = np.array_split(args.full_repr_names, size)
+        args.symmetry_visualization_names = np.array_split(args.symmetry_visualization_names, size)
+        args.report_names = np.array_split(args.report_names, size)
+    args.structures = comm.scatter(args.structures, root=0)
+    args.symdef_names = comm.scatter(args.symdef_names, root=0)
+    args.input_names = comm.scatter(args.input_names, root=0)
+    args.rosetta_repr_names = comm.scatter(args.rosetta_repr_names, root=0)
+    args.full_repr_names = comm.scatter(args.full_repr_names, root=0)
+    args.symmetry_visualization_names = comm.scatter(args.symmetry_visualization_names, root=0)
+    args.report_names = comm.scatter(args.report_names, root=0)
+
+    make_cubic_symmetry(args.structures, args.symmetry, args.overwrite, args.symdef_names, args.symdef_outpath, args.input_names, args.input_outpath,
+                        args.rosetta_repr, args.rosetta_repr_names, args.rosetta_repr_outpath, args.full_repr, args.full_repr_names, args.full_repr_outpath,
+                        args.symmetry_visualization, args.symmetry_visualization_names, args.symmetry_visualization_outpath, args.quality_assurance,
+                        args.idealize, args.report, args.report_outpath, args.report_names)
 
 if __name__ == '__main__':
     main()

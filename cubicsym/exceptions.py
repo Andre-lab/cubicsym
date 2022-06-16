@@ -25,7 +25,7 @@ class ToHighGeometry(ValueToHigh):
         print(self.message)
 
 class NoSymmetryDetected(BaseException):
-    def __init__(self, message):
+    def __init__(self, message=""):
         extra_message = "No symmetry was detected"
         self.message = message + "\n\n" + extra_message
         print(self.message)

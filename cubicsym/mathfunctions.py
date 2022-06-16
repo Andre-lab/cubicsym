@@ -168,7 +168,7 @@ def criteria_check(value1, value2, diff=2.0):
     return False
 
 def shortest_path(*positions):
-    """Reports on the distance bewteen the positions in cartesian space
+    """Returns the total distance between the positions in cartesian space
 
     :param: positions to consider.
     :return float: the distance between the positions

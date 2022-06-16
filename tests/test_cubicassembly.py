@@ -6,11 +6,6 @@ Tests for the CubicAssembly class
 @Date: 4/6/22
 """
 
-def test_init():
-    from cubicsym.cubicassembly import CubicSymmetricAssembly
-    ca = CubicSymmetricAssembly()
-    assert True
-
 def create_symmetrical_pose(input_name, symmetry_name, repr_name):
     from pyrosetta import init, pose_from_file
     from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
@@ -24,18 +19,84 @@ def create_symmetrical_pose(input_name, symmetry_name, repr_name):
 
 def test_setup_symmetry_I():
     from cubicsym.cubicassembly import CubicSymmetricAssembly
-    from cubicsym.assemblyparser import AssemblyParser
-    parser = AssemblyParser()
-    ca = parser.cubic_assembly_from_cif("inputs/1STM.cif")
+    from symmetryhandler.symmetryhandler import SymmetrySetup
+    ca = CubicSymmetricAssembly("inputs/1STM.cif", "I")
     input_name = "outputs/1stm.cif"
     symmetry_name = "outputs/1stm.symm"
     repr_name = "outputs/1stm_repr.pdb"
     ico_name = "outputs/1stm_ico.cif"
-    ca.output_rosetta_symmetry(symmetry_name=symmetry_name, input_name=input_name, master_to_use="1", rmsd_diff=0.5, angles_diff=2.0)
+    ca.output_rosetta_symmetry(symmetry_name=symmetry_name, input_name=input_name, master_to_use="1", idealize=False)
     create_symmetrical_pose(input_name, symmetry_name, repr_name)
     ca.output(ico_name)
-    # ca = parser.from_symmetric_output_pdb_and_symmetry_file("outputs/1stm.cif", "outputs/1stm.symm")
-    #
-    assert True
+    setup = SymmetrySetup()
+    setup.read_from_file(symmetry_name)
+    setup.print_visualization("outputs/1stm_symm.py")
 
 
+def test_setup_symmetry_I_idealized():
+    # For Icosahedral: 1stm == perfect symmetry, 1jh5 == Not
+    # For Octahedral: 1aew == perfect symmetry, XXXX ==j Not
+    # For tetrahedral: 6JDD == perfect symmetry, XXXX == Not
+    from cubicsym.cubicassembly import CubicSymmetricAssembly
+    # from scripts.cubic_to_rosetta import output_symmetry_visualization_script
+    #for name, perfect, symm in zip(("1YZV","1PVV", "6JDD", "1AEW", "1JH5", "1STM"), (True, False, True, False, True), ("O", "T")):
+    for name, perfect, symm in zip(("5CVZ",), (True, False, True, False, True), ("I", "I")):
+        ca = CubicSymmetricAssembly(f"inputs/{name}.cif", symm)
+        input_name = f"outputs/{name}.pdb"
+        symmetry_name = f"outputs/{name}.symm"
+        repr_name = f"outputs/{name}_repr.pdb"
+        ico_name = f"outputs/{name}_ico.cif"
+        ico_name_ideal = f"outputs/{name}_ico_ideal.cif"
+        ca.output_rosetta_symmetry(symmetry_name=symmetry_name, input_name=input_name, master_to_use="1", idealize=True, outformat="pdb")
+        create_symmetrical_pose(input_name, symmetry_name, repr_name)
+        ca.output(ico_name)
+        # output_symmetry_visualization_script(symmetry_name, f"{name}_symm.py", "outputs", True)
+        # assert ca.intrinsic_perfect_symmetry == perfect, f"{name} should {'NOT' if not perfect else ''} have intrinsic perfect symmetry"
+        assert ca.idealized_symmetry
+        # generate the idealized structures
+        from cubicsym.assemblyparser import AssemblyParser
+        ca_ideal = CubicSymmetricAssembly.from_rosetta_input(input_name, symmetry_name)
+        ca_ideal.output(ico_name_ideal)
+
+def test_from_rosetta_input():
+    from cubicsym.cubicassembly import CubicSymmetricAssembly
+    for name in ("6JDD", "1AEW", "1STM"):
+        input_name = f"outputs/{name}.cif"
+        symmetry_name = f"outputs/{name}.symm"
+        ico_name_ideal = f"outputs/{name}_ico_ideal.cif"
+        ca_ideal = CubicSymmetricAssembly.from_rosetta_input(input_name, symmetry_name)
+        ca_ideal.output(ico_name_ideal)
+
+def test_from_5fold():
+    from cubicsym.cubicassembly import CubicSymmetricAssembly
+    csa = CubicSymmetricAssembly()
+    inputf = "inputs/1STM_AFM5.pdb"
+    outputf = "outputs/1STM_AFM5_sym.cif"
+    symdeff = "outputs/1STM_AFM5_sym.symm"
+    cubicf = "outputs/1STM_AFM5_I.cif"
+    csa.create_from_5fold(inputf, outputf, symdeff)
+    ca_ideal = CubicSymmetricAssembly.from_rosetta_input(outputf, symdeff)
+    ca_ideal.output(cubicf)
+
+
+def test_nonexisting():
+    from cubicsym.cubicassembly import CubicSymmetricAssembly
+    # from scripts.cubic_to_rosetta import output_symmetry_visualization_script
+    #for name, perfect, symm in zip(("1YZV","1PVV", "6JDD", "1AEW", "1JH5", "1STM"), (True, False, True, False, True), ("O", "T")):
+    for name, perfect, symm in zip(("5CVZ",), (True, False, True, False, True), ("I", "I")):
+        ca = CubicSymmetricAssembly(f"inputs/{name}.cif", symm)
+        input_name = f"outputs/{name}.pdb"
+        symmetry_name = f"outputs/{name}.symm"
+        repr_name = f"outputs/{name}_repr.pdb"
+        ico_name = f"outputs/{name}_ico.cif"
+        ico_name_ideal = f"outputs/{name}_ico_ideal.cif"
+        ca.output_rosetta_symmetry(symmetry_name=symmetry_name, input_name=input_name, master_to_use="1", idealize=True, outformat="pdb")
+        create_symmetrical_pose(input_name, symmetry_name, repr_name)
+        ca.output(ico_name)
+        # output_symmetry_visualization_script(symmetry_name, f"{name}_symm.py", "outputs", True)
+        # assert ca.intrinsic_perfect_symmetry == perfect, f"{name} should {'NOT' if not perfect else ''} have intrinsic perfect symmetry"
+        assert ca.idealized_symmetry
+        # generate the idealized structures
+        from cubicsym.assemblyparser import AssemblyParser
+        ca_ideal = CubicSymmetricAssembly.from_rosetta_input(input_name, symmetry_name)
+        ca_ideal.output(ico_name_ideal)

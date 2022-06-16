@@ -5,6 +5,8 @@ Assembly class
 @Author: Mads Jeppesen
 @Date: 4/6/22
 """
+import warnings
+
 import Bio
 import re
 import os
@@ -14,6 +16,7 @@ import numpy as np
 import time
 from pathlib import Path
 from Bio.PDB.MMCIFParser import MMCIFParser
+from Bio.PDB.PDBParser import PDBParser
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from Bio.PDB.mmcifio import MMCIFIO
 from Bio.PDB import PDBIO
@@ -23,20 +26,39 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Align.Applications import MafftCommandline
 from cubicsym.mathfunctions import rotation_matrix, distance
 from string import ascii_lowercase, ascii_uppercase
-from Bio.PDB.Polypeptide import is_aa
+from Bio.PDB.Polypeptide import is_aa, three_to_one
 from Bio.PDB.Structure import Structure
 from Bio.PDB.vectors import Vector
+from cubicsym.mathfunctions import rotation_matrix, shortest_path, criteria_check, angle, \
+    distance, vector, vector_angle, vector_projection, rotate, vector_projection_on_subspace
 
 
 class Assembly(Structure):
     """A class build on top of the Structure class in BioPython"""
 
-    def __init__(self, mmcif, assembly_id, id_="1"):
+    def __init__(self, mmcif=None, assembly_id=None, id_="1", pdb=None):
         super().__init__(id_)
         self.cmd = xmlrpclib.ServerProxy('http://localhost:9123')
         self.server_root_path = ""
         self.assembly_id = assembly_id
-        self.from_mmcif(mmcif)
+        if mmcif and assembly_id:
+            self.from_mmcif(mmcif)
+        if pdb and not assembly_id:
+            self.from_pdb(pdb)
+
+    # FIXME: Only works for single chain subunits
+    def from_pdb(self, file):
+        chain_ids = iter(list(ascii_uppercase) + list(ascii_lowercase) + [str(i) for i in range(0, 10000)])
+        structure = PDBParser(PERMISSIVE=1).get_structure(file, file)
+        for subunit_number, chain in enumerate(structure.get_chains(), 1):
+            subunit = Bio.PDB.Model.Model(f"{subunit_number}")
+            new_chain = chain.copy()
+            # new_chain.transform(r,t) - problem is that it right multiplies!
+            new_chain.id = next(chain_ids)
+            subunit.add(new_chain)
+            self.add(subunit)
+        # now we check if the assembly is valid and return if it is:
+        self._create_sequence_alignment_map()
 
     # TODO: THE USE AUTHOR CHAINS CAN BE AUTOMATIC BY COMPARING THE AUTHOR CHAINS TO LABELS CHAINS TO THE ASYM CHAINS SPECIFIED IN struct_asym lines
     def from_mmcif(self, file):
@@ -94,12 +116,13 @@ class Assembly(Structure):
             # chain name and subunit number specifiers
             chain_ids = iter(list(ascii_uppercase) + list(ascii_lowercase) + [str(i) for i in range(0, 10000)])
 
-            # cubicassembly = CubicSymmetricAssembly(structure_name + "_assembly")
-
             subunit_number = 0
             if len(rotations) == 0 and len(translations) == 0:
-                print("file contains full assembly")
-                assert (1 == 2)  # just fail here!
+                # just make an identity rotation and translation
+                rotations.append(np.identity(3))
+                translations.append(np.zeros(3))
+                # print("file contains full assembly")
+                # assert (1 == 2)  # just fail here!
             for symmetry_operation_number, (r, t) in enumerate(zip(rotations, translations), 1):
                 print("applying symmetry operation " + str(symmetry_operation_number) + "/" + str(len(rotations)))
                 for chains in subunits:
@@ -176,7 +199,8 @@ class Assembly(Structure):
         self.cmd.load(tmp)
         os.remove(tmp)
 
-    def output_subunit_as_specified(self, filename, subunit, format="cif"):
+    @staticmethod
+    def output_subunit_as_specified(filename, subunit, format="cif"):
         """TODO"""
         if format == "cif":
             io = MMCIFIO()
@@ -187,7 +211,9 @@ class Assembly(Structure):
             file.write("_citation.title rosetta_wants_me_to_do_this..")
             file.close()
         else:
-            raise NotImplementedError
+            io = PDBIO()
+            io.set_structure(subunit)
+            io.save(filename)
 
     def map_subunit_id_onto_chains(self):
         for subunit in self.get_subunits():
@@ -553,21 +579,34 @@ class Assembly(Structure):
             self.xtra["alignment_geometric_center"] = geometric_center
             ##########################
 
+    def _write_fasta(self, out, wrap=80):
+        with open(out, "w") as f:
+            for subunit in self.get_subunits():
+                seq = "".join([three_to_one(i.get_resname()) for i in subunit.get_residues() if is_aa(i, standard=True)])
+                f.write(f">{subunit.id}\n")
+                for seq_line in [seq[i:i + wrap] for i in range(0, len(seq), wrap)]:
+                    f.write(f"{seq_line}\n")
+
     def _create_sequence_alignment_map(self):
 
-        # 1. get the sequence for all chains and create a fasta file:
 
-        # todo: theres is something weird about the way i have build self,
-        #   such that more direct methods dont work. I only get one chain when
-        #   I should get multiple for ppb.build_peptides(subunit) or another method,
-        #   seqrecord = PdbIO.AtomIterator("1stm_assembly", self), so I am doing this manually now
-        ppb = ppb=PPBuilder()
-        seqs = []
-        for subunit in self.get_subunits():
-            seqs.append(SeqRecord( ppb.build_peptides(subunit, aa_only=0)[0].get_sequence(), id=subunit.id, description=""))
-        # todo: remeber to delete this file again in tmå
+        # # todo: theres is something weird about the way i have build self,
+        # #   such that more direct methods dont work. I only get one chain when
+        # #   I should get multiple for ppb.build_peptides(subunit) or another method,
+        # #   seqrecord = PdbIO.AtomIterator("1stm_assembly", self), so I am doing this manually now
+        # ppb = ppb=PPBuilder()
+        # seqs = []
+        # for subunit in self.get_subunits():
+        #     seq = ppb.build_peptides(subunit, aa_only=0)
+        #     seqs.append(SeqRecord(seq[0].get_sequence(), id=subunit.id, description=""))
+        # # todo: remeber to delete this file again in tmå
+        # in_file = f"/tmp/{''.join([str(random.randint(0,9)) for i in range(10)])}.fasta"
+        # SeqIO.write(seqs, in_file, "fasta")
+
+
+        # 1. get the sequence for all chains and create a fasta file:
         in_file = f"/tmp/{''.join([str(random.randint(0,9)) for i in range(10)])}.fasta"
-        SeqIO.write(seqs, in_file, "fasta")
+        self._write_fasta(in_file)
         mafft_cline = MafftCommandline(input=in_file, clustalout=True)  # , thread=1)
         stdout, stderr = mafft_cline()
         new = stdout.split("\n")
@@ -619,7 +658,7 @@ class Assembly(Structure):
         for n, subunit in enumerate(self.get_subunits(), 1):
             subunit.xtra["alignment"] = alignment_map[n]
 
-    def _reconstruct(self, mmcif_dict, model, canonical=True):
+    def _reconstruct(self, mmcif_dict, model, canonical=False):
         """Reconstructs the model.
         Modifies:
          - Chain names so that the label_asym_id are used instead of the author ones
@@ -695,6 +734,9 @@ class Assembly(Structure):
         """
         # fetch symmetry operations numbers to generate the picked assembly
         symmetry_operations = mmcif_dict["_pdbx_struct_assembly_gen.oper_expression"][pick]
+        if ")(" in symmetry_operations:
+            warnings.warn(f"Code does not yet support combinations of operations such as {symmetry_operations}")
+            return [], []
         if "(" in symmetry_operations:
             symmetry_operations = symmetry_operations[1:-1].split(",")
         else:
@@ -706,7 +748,11 @@ class Assembly(Structure):
                 end = ele.split("-")[1]
                 for value in range(int(start), int(end) + 1):
                     symmetry_operations.append(str(value))
-        symmetry_operations.sort(key=int)
+        # What is the benifit of sorting them? This can give rise to value errors if the names are not digits!!
+        # try:
+        #     symmetry_operations.sort(key=int)
+        # except ValueError: # operations consists of non-numbers. Just keep it as it is.
+        #     ...
 
         # fetch the rotation and translation matrices/vectors of the symmetry operations
         rm_list = []
@@ -729,3 +775,34 @@ class Assembly(Structure):
             tv_list.append(tv)
 
         return rm_list, tv_list
+
+    def _get_global_center(self):
+        """Defines the global center and its coordinate frame."""
+        global_z = np.array([0, 0, 1])
+        global_y = np.array([0, 1, 0])
+        global_x = np.array([1, 0, 0])
+        global_center = np.array([0, 0, 0])
+        return global_x, global_y, global_z, global_center
+
+    def align_to_z_axis(self, ids=None):
+        """Aligns the assembly to the z-axis. Can choose certain ids to use."""
+        _, _, global_z, global_center = self._get_global_center()
+        current_axis = vector(self.get_geometric_center(ids=ids), global_center)
+        self.rotate_about_axis(np.cross(global_z, current_axis), vector_angle(global_z, current_axis))
+
+    def align_subunit_to_x_axis(self, subunit):
+        """Aligns the assembly so that the subunit CA atom closest to the geometric center is along the x-axis."""
+        global_x, _, global_z, global_center = self._get_global_center()
+        subunit_com = self.get_subunit_CA_closest_to_GC(subunit)
+        z1high = vector_projection(subunit_com, global_z)
+        x_vector = vector(subunit_com, z1high)
+        x_rotation = vector_angle(x_vector, global_x)
+        self.rotate_about_axis(np.cross(global_x, x_vector), x_rotation)
+
+    def create_centered_subunit(self, subunit_id):
+        """Centers the subunit so that the CA atom closest to the geometric center is located at the global center."""
+        _, _, _, global_center = self._get_global_center()
+        adjust = vector(global_center, self.get_subunit_CA_closest_to_GC(subunit_id))
+        master = self.get_subunit_with_id(subunit_id).copy()
+        master.transform(np.identity(3), adjust)
+        return master
