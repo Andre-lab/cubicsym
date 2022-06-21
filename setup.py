@@ -4,7 +4,7 @@ from pathlib import Path
 setup(
     name='cubicsym',
     version='0.1',
-    scripts=[p for p in map(str,Path("scripts/").rglob("*")) if Path(p).is_file() if "__pycache__" not in  str(p)],
+    scripts=[p for p in map(str,Path("scripts/").rglob("*")) if Path(p).is_file() if "__pycache__" not in  str(p) and "__init__.py" not in  str(p)],
     packages=['cubicsym'],
     url='https://github.com/Andre-lab/cubicsym',
     license='MIT',
