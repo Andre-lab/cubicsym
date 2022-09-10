@@ -36,11 +36,39 @@ from cubicsym.mathfunctions import rotation_matrix, shortest_path, criteria_chec
 class Assembly(Structure):
     """A class build on top of the Structure class in BioPython"""
 
-    def __init__(self, mmcif=None, assembly_id=None, id_="1", pdb=None):
+    def __init__(self, mmcif=None, assembly_id=None, id_="1", pdb=None, rosetta_asymmetric_units=None):
+        """Creates an Assembly object from a mmcif file and the assembly id
+
+        :param mmcif: MMCIF File to create the Assembly from.
+        :param assembly_id: The assembly id to use for generation of the Assembly.
+        :param id_: The BioPython id given to the assembly
+        :param pdb: PDB file to create the assembly from.
+        :param rosetta_asymmetric_units: Determines which chains are grouped into Rosetta specific asymmetric units.
+        This is not related to the crystallographic asymmetric unit but the asymmetric unit as it is modelled in Rosetta when applying
+        symmetry. It is the unit that is symmetrized in either I, O or T symmetry and is equivalent to the input file used when applying
+        symmetry in Rosetta. This code always copies each asymmetric unit:
+        - 60 times for an Icosahedron.
+        - 24 times for an Octahedron.
+        - 12 times for a Tetrahedron.
+        The input protein therefore has to be conform to this convention. A 120-mer icosahedron therefor has to group 2 chains together,
+        a 72-mer octahedron has to group 3 chains together and so forth.
+        The code auto detects this to some degree but can potentially fail depending on the information given in the file. For a MMCIF file
+        the _struct_asym.id information is used to determine the grouping. Each different id will go into a single group each.
+        If a pdb file is given the code expects there to be the exact amount of chains as groups so 60 chains for an Icosahedron for instance.
+        Parsing rosetta_asymmetric_units only works together with mmcif in order to quide the grouping if the grouping is not happending correctly.
+        Groups are specified on a chain basis where chain names constituting a group are seperated by a ',' and different group seperated
+        by whitespaces.
+
+        Examples of a 60-mer icosahedron
+        --rosetta_asymmetric_units A B C D E F G H I J K L M N ...
+        Examples of a 120-mer icosahedron
+        --rosetta_asymmetric_units A,B C,D E,F G,H I,J K,L M,N ...
+        """
         super().__init__(id_)
         self.cmd = xmlrpclib.ServerProxy('http://localhost:9123')
         self.server_root_path = ""
         self.assembly_id = assembly_id
+        self.rosetta_asymmetric_units = rosetta_asymmetric_units
         if mmcif and assembly_id:
             self.from_mmcif(mmcif)
         if pdb and not assembly_id:
@@ -88,31 +116,35 @@ class Assembly(Structure):
             rotations, translations = self._get_symmetry_operations(assin, mmcif_dict)
             # create a subunit list outer: [] is the subunits, inner: [] is the chains of the different subunits.
             asymmetric_chains = {}
-            subunits = []
-            for asym_chain, number in list(zip(mmcif_dict["_struct_asym.id"], mmcif_dict["_struct_asym.entity_id"])):
-                if not model.has_id(asym_chain):
-                    continue
-                if not number in asymmetric_chains:
-                    asymmetric_chains[number] = []
-                asymmetric_chains[number].append(asym_chain)
-            asymmetric_chains = sorted([chains for number, chains in asymmetric_chains.items()], key=len)
-            # Four cases cases:
-            # 1: [(1, ["A", "B", "C"])] - subunit with 1 chain where all other chains are asymmetric partners of that one. example: 1stm
-            # 2: [(1, ["A", "B"]), 2: ["C", "D"])] subunit with many chains but each division have equal length
-            # 3: [(1, ["A"]), 2: ["C", "D"])] subunit with many chains but each division does NOT have equal length: example: 3j17
-            # 4: [(1, ["A", "B", "C"])] - similar to #1 but you want to include all the asymmetrical chains in the subunit: example: 1m1c
-            # if 1 or 2:
-            if all([len(chains) == len(asymmetric_chains[0]) for chains in asymmetric_chains]) and len(rotations) * len(
-                    asymmetric_chains[0]) == 60:
-                # 1
-                if len(asymmetric_chains) == 1:
-                    subunits = [[chain] for chain in asymmetric_chains[0]]
-                # 2
-                else:
-                    subunits = [list(chains) for chains in zip(*asymmetric_chains)]
-            # if 3 or 4
+            if self.rosetta_asymmetric_units:
+                rosetta_asymmetric_units = [s.split(",") for s in self.rosetta_asymmetric_units.split(" ")]
             else:
-                subunits = [[chain for chains in asymmetric_chains for chain in chains]]
+                for asym_chain, number in list(zip(mmcif_dict["_struct_asym.id"], mmcif_dict["_struct_asym.entity_id"])):
+                    if not model.has_id(asym_chain):
+                        continue
+                    if not number in asymmetric_chains:
+                        asymmetric_chains[number] = []
+                    asymmetric_chains[number].append(asym_chain)
+                asymmetric_chains = sorted([chains for number, chains in asymmetric_chains.items()], key=len)
+                # FIXME: doesnt account for chainbreaks
+                # Four cases cases:
+                # 1: [(1, ["A", "B", "C"])] - subunit with 1 chain where all other chains are asymmetric partners of that one. example: 1stm
+                # 2: [(1, ["A", "B"]), 2: ["C", "D"])] subunit with many chains but each division have equal length
+                # 3: [(1, ["A"]), 2: ["C", "D"])] subunit with many chains but each division does NOT have equal length: example: 3j17
+                # 4: [(1, ["A", "B", "C"])] - similar to #1 but you want to include all the asymmetrical chains in the subunit: example: 1m1c
+                # if 1 or 2:
+                if all([len(chains) == len(asymmetric_chains[0]) for chains in asymmetric_chains]) and len(rotations) * len(
+                        asymmetric_chains[0]) == 60:
+                    # 1
+                    if len(asymmetric_chains) == 1:
+                        rosetta_asymmetric_units = [[chain] for chain in asymmetric_chains[0]]
+                    # 2
+                    else:
+                        rosetta_asymmetric_units = [list(chains) for chains in zip(*asymmetric_chains)]
+                # if 3 or 4
+                else:
+                    rosetta_asymmetric_units = [[chain for chains in asymmetric_chains for chain in chains]]
+
             # chain name and subunit number specifiers
             chain_ids = iter(list(ascii_uppercase) + list(ascii_lowercase) + [str(i) for i in range(0, 10000)])
 
@@ -125,7 +157,7 @@ class Assembly(Structure):
                 # assert (1 == 2)  # just fail here!
             for symmetry_operation_number, (r, t) in enumerate(zip(rotations, translations), 1):
                 print("applying symmetry operation " + str(symmetry_operation_number) + "/" + str(len(rotations)))
-                for chains in subunits:
+                for chains in rosetta_asymmetric_units:
                     subunit_number += 1
                     subunit = Bio.PDB.Model.Model(f"{subunit_number}")
                     for chain in chains:
@@ -216,8 +248,24 @@ class Assembly(Structure):
             io.save(filename)
 
     def map_subunit_id_onto_chains(self):
+        # If any of the current chain ids is a digit we have to change it to a tempory name else we cannot map that exact digit
+        # onto another chain as they all have to be unique
+        original_id = []
         for subunit in self.get_subunits():
             for chain in subunit.get_chains():
+                # if chain.id.isdigit():
+                original_id.append(chain.id)
+                while True:
+                    try:
+                        chain.id = ''.join(random.choice(ascii_lowercase) for i in range(10))
+                    except ValueError:
+                        pass
+                    else:
+                        break
+        original_id = iter(original_id)
+        for subunit in self.get_subunits():
+            for chain in subunit.get_chains():
+                print("mapping", next(original_id), "to", subunit.id)
                 chain.id = subunit.id
 
     def output(self, filename, ids=None, format="cif", same=True, map_subunit_ids_to_chains=False):
@@ -587,10 +635,7 @@ class Assembly(Structure):
                 for seq_line in [seq[i:i + wrap] for i in range(0, len(seq), wrap)]:
                     f.write(f"{seq_line}\n")
 
-    def _create_sequence_alignment_map(self):
-
-
-        # # todo: theres is something weird about the way i have build self,
+      # # todo: theres is something weird about the way i have build self,
         # #   such that more direct methods dont work. I only get one chain when
         # #   I should get multiple for ppb.build_peptides(subunit) or another method,
         # #   seqrecord = PdbIO.AtomIterator("1stm_assembly", self), so I am doing this manually now
@@ -602,6 +647,13 @@ class Assembly(Structure):
         # # todo: remeber to delete this file again in tmå
         # in_file = f"/tmp/{''.join([str(random.randint(0,9)) for i in range(10)])}.fasta"
         # SeqIO.write(seqs, in_file, "fasta")
+    def _create_sequence_alignment_map(self):
+        """Creates sequence alignment between all the subunits of the assembly. This is alignment in stored in xtra["alignment"].
+        It maps the residue index number to """
+
+
+
+
 
 
         # 1. get the sequence for all chains and create a fasta file:
@@ -628,16 +680,16 @@ class Assembly(Structure):
                 # 60              HYTLQSNGNYKFDQMLLTAQNLPASYNYCRLVSRSLTVRSSTLPGGVYALNGTINAVTFQ
                 #                 ***********************************************************
                 stars += i[16:]
-
+        # fixme: This is 60?! So only icosahedral specific
         counter = {i: 0 for i in range(1, 61)}
         alignment_map = {i: [] for i in range(1, 61)}
 
         # WE ARE USING ZERO INDEXING!
         for n, star in enumerate(stars):
             if star == " ": # no match
-                # increase counters for which there are lettes, and if '-' dont.
+                # increase counters for which there are AA letters and not for '-'
                 for i in mafft_alignment.keys():
-                    letter = mafft_alignment[i][counter[i]]
+                    letter = mafft_alignment[i][n]
                     if letter != "-":
                         counter[i] += 1
             # if "*" that means that that particular sequence residue matches across all chains
