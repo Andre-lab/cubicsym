@@ -6,6 +6,7 @@ Tests for the CubicAssembly class
 @Date: 4/6/22
 """
 
+
 def create_symmetrical_pose(input_name, symmetry_name, repr_name):
     from pyrosetta import init, pose_from_file
     from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
@@ -100,3 +101,49 @@ def test_nonexisting():
         from cubicsym.assemblyparser import AssemblyParser
         ca_ideal = CubicSymmetricAssembly.from_rosetta_input(input_name, symmetry_name)
         ca_ideal.output(ico_name_ideal)
+
+def test_foldmap():
+    from cubicsym.cubicassembly import CubicSymmetricAssembly
+    from shapedesign.settings import SYMMETRICAL
+    name, symmfolder, foldmap, symmetry = "7M2V", "I", {"hf1": ["1", "2", "3", "4", "11"], "hf2": ["5", "16", "14", "13", "10"], "hf3": ["17", "6", "20", "18", "19"],
+              "3": ["10", "19", "1"], "21": ["1", "18"], "22": ["1", "13"]}, "I"
+    force_symmetry, rosetta_asym_unit = None, None
+    ca = CubicSymmetricAssembly(SYMMETRICAL.joinpath(f"{symmfolder}/unrelaxed/native/{name}.cif"), mmcif_symmetry=symmetry, force_symmetry=force_symmetry, rosetta_asymmetric_units=rosetta_asym_unit)
+    input_name = f"outputs/{name}.pdb"
+    symmetry_name = f"outputs/{name}.symm"
+    repr_name = f"outputs/{name}_repr.pdb"
+    ico_name = f"outputs/{name}_ico.cif"
+    ico_name_ideal = f"outputs/{name}_ico_ideal.cif"
+    ca.output_rosetta_symmetry(symmetry_name=symmetry_name, input_name=input_name, master_to_use="1", idealize=True, outformat="pdb",
+                               foldmap=foldmap)
+    create_symmetrical_pose(input_name, symmetry_name, repr_name)
+    ca.output(ico_name)
+    assert ca.idealized_symmetry
+    ca_ideal = CubicSymmetricAssembly.from_rosetta_input(input_name, symmetry_name)
+    ca_ideal.output(ico_name_ideal)
+
+def test_afoncubicI():
+    from cubicsym.cubicassembly import CubicSymmetricAssembly
+    from shapedesign.settings import SYMMETRICAL
+    # from scripts.cubic_to_rosetta import output_symmetry_visualization_script
+    # to make it fit i have:
+    # for 7MV2 I need to specifiy the
+    for name, symmfolder, foldmap, symmetry in zip(("6RPO", "6JJA", "6S44", "6ZLO", "7NO0"), ("I", "I", "I", "I", "I"), (None, None, None, None, None), ("I", "I", "I", "I", "I")):
+        force_symmetry, rosetta_asym_unit = None, None
+        ca = CubicSymmetricAssembly(SYMMETRICAL.joinpath(f"{symmfolder}/unrelaxed/native/{name}.cif"), mmcif_symmetry=symmetry, force_symmetry=force_symmetry, rosetta_asymmetric_units=rosetta_asym_unit)
+        input_name = f"outputs/{name}.pdb"
+        symmetry_name = f"outputs/{name}.symm"
+        repr_name = f"outputs/{name}_repr.pdb"
+        ico_name = f"outputs/{name}_ico.cif"
+        ico_name_ideal = f"outputs/{name}_ico_ideal.cif"
+        ca.output_rosetta_symmetry(symmetry_name=symmetry_name, input_name=input_name, master_to_use="1", idealize=True, outformat="pdb",
+                                   foldmap=foldmap)
+        create_symmetrical_pose(input_name, symmetry_name, repr_name)
+        ca.output(ico_name)
+        # output_symmetry_visualization_script(symmetry_name, f"{name}_symm.py", "outputs", True)
+        # assert ca.intrinsic_perfect_symmetry == perfect, f"{name} should {'NOT' if not perfect else ''} have intrinsic perfect symmetry"
+        assert ca.idealized_symmetry
+        # generate the idealized structures
+        from cubicsym.assemblyparser import AssemblyParser
+        # ca_ideal = CubicSymmetricAssembly.from_rosetta_input(input_name, symmetry_name)
+        # ca_ideal.output(ico_name_ideal)
