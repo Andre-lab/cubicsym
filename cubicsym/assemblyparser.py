@@ -36,7 +36,7 @@ class AssemblyParser:
         self.parser = MMCIFParser()
 
     def from_pose(cls, pose, name=""):
-        return CubicSymmetricAssembly(name, )
+        return CubicSymmetricAssembly(name)
 
     def create_symmetric_pose_from_asymmetric_output(self, file: str, return_symmetry_file=False):
         init("-initialize_rigid_body_dofs true -pdb_comments")
@@ -195,7 +195,7 @@ class AssemblyParser:
 
         if len(structure.get_list()) % 60 == 0:
             print("Structure is icosahedral")
-            assembly = CubicSymmetricAssembly(structure_name + "_assembly", )
+            assembly = CubicSymmetricAssembly(structure_name + "_assembly")
             # chains_in_subunit = len(unique_chain_names) // 60
             # print("Subunits consists of", chains_in_subunit)
             # for subunit_number, chains in enumerate([[chain for chain in list(structure.get_chains())[i:i+i*chains_in_subunit]] for i in range(0, 60*chains_in_subunit, chains_in_subunit)],1):
