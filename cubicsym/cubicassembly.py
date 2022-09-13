@@ -816,6 +816,12 @@ class CubicSymmetricAssembly(Assembly):
             foldmap_subunits[key] = self.get_subunits(val)
         return foldmap_subunits
 
+    def add_along_vector(self, origo, vector, mul=1, dir=-1):
+        return origo + (dir * vector / np.linalg.norm(vector)) * mul
+
+    # def add_1_along_z(self, origo, z):
+    #     return origo + (-1 * z / np.linalg.norm(z))
+
     def setup_symmetry(self, symmetry_name, master_id="1", subunits_in_other_highfold=2, idealize=True, foldmap:dict=None):
         """Sets up a SymmetrySetup object for either Icosahedral (I), Octahedral (O) or Tetrahedral (T) symmetry.
 
@@ -890,26 +896,41 @@ class CubicSymmetricAssembly(Assembly):
         # ---- Main highest fold ----
         # First make the following (not sure why this is needed to be done this way, but when i did this (1 year ago) there prob. was some reason...
         # for highest fold == 5: VRTglobal->VRT5fold->VRT5fold1 -> this then connects to all of the subunits
-        suffix = ""
         name = f"VRTHFfold"
         jump = f"JUMPHFfold"
-        for i in range(2):
-            setup.add_vrt(CoordinateFrame(name + suffix, reversed_global_x, global_y, reversed_global_z, global_center))
-            if i == 0:
-                setup.add_jump(jump, "VRTglobal", name) # VRTglobal->VRT5fold
+        si = ("1_z_tref", "", "1", "1_z_rref", "1_z", "1_x_tref", "", "1", "1_x_rref", "1_x", "1_y_rref", "1_y", "1_z_rref", "1_z")
+        for i in range(5): #
+            x, y, z, origo = reversed_global_x, global_y, reversed_global_z, global_center
+            if "1_z_tref" == si[i]:
+                setup.add_vrt(CoordinateFrame(name + si[i], x, y, z, self.add_along_vector(origo, z, dir=1)))
+            elif "1_z_rref" == si[i]:
+                setup.add_vrt(CoordinateFrame(name + si[i], x, y, z, self.add_along_vector(origo, z)))
             else:
-                setup.add_jump(jump + suffix, name + suffix[:-1], name + suffix) # VRT5fold->VRT5fold1
-            suffix += "1"
-        to_go_through = [highest_angle * i for i in range(0, highest_fold)]
-        for i, angle in enumerate(to_go_through, 1):
+                setup.add_vrt(CoordinateFrame(name + si[i], x, y, z, origo))
+            if si[i] == "1_z_tref":
+                setup.add_jump(jump + si[i], "VRTglobal", name + si[i])
+            else:
+                setup.add_jump(jump + si[i], name + si[i-1], name + si[i])
+        to_go_through = [highest_angle * k for k in range(0, highest_fold)]
+        for j, angle in enumerate(to_go_through, 1):
             rt = rotation_matrix(z1high, angle)
-            suffix = "1" + str(i)
-            for i in range(3):
-                setup.add_vrt(CoordinateFrame(name + suffix, rotate(reversed_global_x, rt), rotate(global_y, rt),
-                                              rotate(reversed_global_z, rt), global_center))
-                setup.add_jump(jump + suffix, name + suffix[:-1], name + suffix)
-                suffix += "1"
-            setup.add_jump(jump + suffix[:-1] + "_subunit", name + suffix[:-1], "SUBUNIT")
+            sj = f"1{j}"
+            for i in range(5, len(si)):
+                suffix = sj + si[i]
+                suffixp = si[i - 1] if i == 5 else sj + si[i - 1]
+                x, y, z, origo = rotate(reversed_global_x, rt), rotate(global_y, rt), rotate(reversed_global_z, rt), global_center
+                if "1_x_rref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, x)))
+                elif "1_y_rref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, y)))
+                elif "1_z_rref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, z)))
+                elif "1_x_tref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, x, dir=1)))
+                else:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, origo))
+                setup.add_jump(jump + suffix, name + suffixp, name + suffix)
+            setup.add_jump(jump + f"{sj}1" + "_subunit", name + suffix, "SUBUNIT")
         # ---------------------
 
         closest_2fold_id, furthest_2fold_id = self.get_closest_and_furthest_2_fold(master_id, master_2_folds)
@@ -950,31 +971,46 @@ class CubicSymmetricAssembly(Assembly):
         suffix = ""
         name = "VRT3fold"
         jump = "JUMP3fold"
-        for i in range(2):
-            setup.add_vrt(CoordinateFrame(name + suffix, rotate(reversed_global_x, rt_from_global_z), rotate(global_y, rt_from_global_z),
-                                          rotate(reversed_global_z, rt_from_global_z), global_center))
-            if i == 0:
-                setup.add_jump(jump, "VRTglobal", name) # VRTglobal->VRT3fold
+        for i in range(5):
+            x, y, z = rotate(reversed_global_x, rt_from_global_z), rotate(global_y, rt_from_global_z), rotate(reversed_global_z, rt_from_global_z)
+            origo = global_center
+            if "1_z_tref" == si[i]:
+                setup.add_vrt(CoordinateFrame(name + si[i], x, y, z, self.add_along_vector(origo, z, dir=1)))
+            elif "1_z_rref" == si[i]:
+                setup.add_vrt(CoordinateFrame(name + si[i], x, y, z, self.add_along_vector(origo, z)))
             else:
-                setup.add_jump(jump + suffix, name + suffix[:-1], name + suffix) # VRT3fold->VRT3fold1
-            suffix += "1"
+                setup.add_vrt(CoordinateFrame(name + si[i], x,y, z, origo))
+            if si[i] == "1_z_tref":
+                setup.add_jump(jump + si[i], "VRTglobal", name + si[i]) # VRTglobal->VRT3fold
+            else:
+                setup.add_jump(jump + si[i], name + si[i-1], name + si[i]) # VRT3fold->VRT3fold1
         start = 180 - highest_angle
-        to_go_through = [start + highest_angle * i for i in range(0, subunits_in_other_highfold)]
-        for i, angle in enumerate(to_go_through, 1):
+        to_go_through = [start + highest_angle * k for k in range(0, subunits_in_other_highfold)]
+        for j, angle in enumerate(to_go_through, 1):
             # so before coming here we have the master subunit along the positive x-axis.
             # if the 3-fold axis is left to the x-axis (y coordinate of the adjacent subunit is negative), we have to rotate
-            # in the obbosite direction. This is why we check for the y coordinate in the below. See for instance 1stm vs 4bcu.
+            # in the opposite direction. This is why we check for the y coordinate in the condition below. See for instance 1stm vs 4bcu.
             if z3high[1] < 0:
                 angle *= -1
             rt_around_axis = rotation_matrix(axis, angle)  # check angle / positive or negative
             rt = np.dot(rt_from_global_z, rt_around_axis)  # check that this is okay
-            suffix = "1" + str(i)
-            for i in range(3):
-                setup.add_vrt(CoordinateFrame(name + suffix, rotate(reversed_global_x, rt), rotate(global_y, rt),
-                                              rotate(reversed_global_z, rt), global_center))
-                setup.add_jump(jump + suffix, name + suffix[:-1], name + suffix)
-                suffix += "1"
-            setup.add_jump(jump + suffix[:-1] + "_subunit", name + suffix[:-1], "SUBUNIT")
+            sj = f"1{j}"
+            for i in range(5, len(si)):
+                suffix = sj + si[i]
+                suffixp = si[i - 1] if i == 5 else sj + si[i - 1]
+                x, y, z, origo = rotate(reversed_global_x, rt), rotate(global_y, rt), rotate(reversed_global_z, rt), global_center
+                if "1_x_rref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, x)))
+                elif "1_y_rref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, y)))
+                elif "1_z_rref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, z)))
+                elif "1_x_tref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, x, dir=1)))
+                else:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, origo))
+                setup.add_jump(jump + suffix, name + suffixp, name + suffix)
+            setup.add_jump(jump + f"{sj}1" + "_subunit", name + suffix, "SUBUNIT")
         # ------------------------------
 
         # ---- Main 2-fold's 5-fold ----
@@ -986,18 +1022,22 @@ class CubicSymmetricAssembly(Assembly):
         suffix = ""
         name = "VRT2fold"
         jump = "JUMP2fold"
-        for i in range(2):
-            setup.add_vrt(CoordinateFrame(name + suffix, rotate(reversed_global_x, rt_from_global_z),
-                                          rotate(global_y, rt_from_global_z),
-                                          rotate(reversed_global_z, rt_from_global_z), global_center))
-            if i == 0:
-                setup.add_jump(jump, "VRTglobal", name) # VRTglobal->VRT2fold
+        for i in range(5):
+            x, y, z = rotate(reversed_global_x, rt_from_global_z), rotate(global_y, rt_from_global_z), rotate(reversed_global_z, rt_from_global_z)
+            origo = global_center
+            if "1_z_tref" == si[i]:
+                setup.add_vrt(CoordinateFrame(name + si[i], x, y, z, self.add_along_vector(origo, z, dir=1)))
+            elif "1_z_rref" == si[i]:
+                setup.add_vrt(CoordinateFrame(name + si[i], x, y, z, self.add_along_vector(origo, z)))
             else:
-                setup.add_jump(jump + suffix, name + suffix[:-1], name + suffix) # VRT2fold->VRT2fold1
-            suffix += "1"
+                setup.add_vrt(CoordinateFrame(name + si[i], x, y, z, origo))
+            if si[i] == "1_z_tref":
+                setup.add_jump(jump + si[i], "VRTglobal", name + si[i]) # VRTglobal->VRT2fold
+            else:
+                setup.add_jump(jump + si[i], name + si[i-1], name + si[i]) # VRT2fold->VRT2fold1
         start = 180
-        to_go_through = [start + highest_angle * i for i in range(0, subunits_in_other_highfold)]
-        for i, angle in enumerate(to_go_through, 1):
+        to_go_through = [start + highest_angle * k for k in range(0, subunits_in_other_highfold)]
+        for j, angle in enumerate(to_go_through, 1):
             rt_from_global_z = rotation_matrix(np.cross(axis, global_z), vector_angle(axis, global_z))
             # so before coming here we have the master subunit along the positive x-axis.
             # if the 3-fold axis is left to the x-axis (y coordinate of the adjacent subunit is negative), we have to rotate
@@ -1006,53 +1046,65 @@ class CubicSymmetricAssembly(Assembly):
                 angle *= -1
             rt_around_axis = rotation_matrix(axis, angle)  # check angle / positive or negative
             rt = np.dot(rt_from_global_z, rt_around_axis)  # check that this is okay
-            suffix = "1" + str(i)
-            for i in range(3):
-                setup.add_vrt(CoordinateFrame(name + suffix, rotate(reversed_global_x, rt), rotate(global_y, rt),
-                                              rotate(reversed_global_z, rt), global_center))
-                setup.add_jump(jump + suffix, name + suffix[:-1], name + suffix)
-                suffix += "1"
-            setup.add_jump(jump + suffix[:-1] + "_subunit", name + suffix[:-1], "SUBUNIT")
+            sj = f"1{j}"
+            for i in range(5, len(si)):
+                suffix = sj + si[i]
+                suffixp = si[i - 1] if i == 5 else sj + si[i - 1]
+                x, y, z, origo = rotate(reversed_global_x, rt), rotate(global_y, rt), rotate(reversed_global_z, rt), global_center
+                if "1_x_rref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, x)))
+                elif "1_y_rref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, y)))
+                elif "1_z_rref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, z)))
+                elif "1_x_tref" == si[i]:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, x, dir=1)))
+                else:
+                    setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, origo))
+                setup.add_jump(jump + suffix, name + suffixp, name + suffix)
+            setup.add_jump(jump +  f"{sj}1" + "_subunit", name + suffix, "SUBUNIT")
         # ------------------------------
 
         # The 6 degrees of freedom
         setup.add_dof(f"JUMPHFfold1", 'z', "translation", np.linalg.norm(z1high))
-        setup.add_dof(f"JUMPHFfold1", 'z', "rotation", 0)
+        setup.add_dof(f"JUMPHFfold1_z", 'z', "rotation", 0)
         setup.add_dof(f"JUMPHFfold111", 'x', "translation", np.linalg.norm(vector(master_com, z1high)))
-        setup.add_dof(f"JUMPHFfold1111", 'x', "rotation", 0)
-        setup.add_dof(f"JUMPHFfold1111", 'y', "rotation", 0)
-        setup.add_dof(f"JUMPHFfold1111", 'z', "rotation", 0)
-        setup.add_dof(f"JUMPHFfold1111_subunit", 'x', "rotation", 0)
-        setup.add_dof(f"JUMPHFfold1111_subunit", 'y', "rotation", 0)
-        setup.add_dof(f"JUMPHFfold1111_subunit", 'z', "rotation", 0)
+        setup.add_dof(f"JUMPHFfold111_x", 'x', "rotation", 0)
+        setup.add_dof(f"JUMPHFfold111_y", 'y', "rotation", 0)
+        setup.add_dof(f"JUMPHFfold111_z", 'z', "rotation", 0)
+        setup.add_dof(f"JUMPHFfold111_subunit", 'x', "rotation", 0)
+        setup.add_dof(f"JUMPHFfold111_subunit", 'y', "rotation", 0)
+        setup.add_dof(f"JUMPHFfold111_subunit", 'z', "rotation", 0)
         setup.add_jumpgroup("JUMPGROUP1", f"JUMPHFfold1", "JUMP3fold1", "JUMP2fold1")
+        setup.add_jumpgroup("JUMPGROUP2", f"JUMPHFfold1_z", "JUMP3fold1_z", "JUMP2fold1_z")
 
-        setup.add_jumpgroup("JUMPGROUP2", *[f"JUMPHFfold1{i}1" for i in range(1, highest_fold + 1)],
+        setup.add_jumpgroup("JUMPGROUP3", *[f"JUMPHFfold1{i}1" for i in range(1, highest_fold + 1)],
                             *[f"JUMP3fold1{i}1" for i in range(1, subunits_in_other_highfold + 1)],
                             *[f"JUMP2fold1{i}1" for i in range(1, subunits_in_other_highfold + 1)])
 
-        setup.add_jumpgroup("JUMPGROUP3", *[f"JUMPHFfold1{i}11" for i in range(1, highest_fold + 1)],
-                            *[f"JUMP3fold1{i}11" for i in range(1, subunits_in_other_highfold + 1)],
-                            *[f"JUMP2fold1{i}11" for i in range(1, subunits_in_other_highfold + 1)])
+        for n, d in zip(("4", "5", "6"), ("x", "y", "z")):
+            setup.add_jumpgroup(f"JUMPGROUP{n}", *[f"JUMPHFfold1{i}1_{d}" for i in range(1, highest_fold + 1)],
+                                *[f"JUMP3fold1{i}1_{d}" for i in range(1, subunits_in_other_highfold + 1)],
+                                *[f"JUMP2fold1{i}1_{d}" for i in range(1, subunits_in_other_highfold + 1)])
 
-        setup.add_jumpgroup("JUMPGROUP4", *[f"JUMPHFfold1{i}11_subunit" for i in range(1, highest_fold + 1)],
-                            *[f"JUMP3fold1{i}11_subunit" for i in range(1, subunits_in_other_highfold + 1)],
-                            *[f"JUMP2fold1{i}11_subunit" for i in range(1, subunits_in_other_highfold + 1)])
+        setup.add_jumpgroup("JUMPGROUP7", *[f"JUMPHFfold1{i}1_subunit" for i in range(1, highest_fold + 1)],
+                            *[f"JUMP3fold1{i}1_subunit" for i in range(1, subunits_in_other_highfold + 1)],
+                            *[f"JUMP2fold1{i}1_subunit" for i in range(1, subunits_in_other_highfold + 1)])
 
         # If T, skip adding bonus to the extra-3-fold subunit since it is the same as the other one
         if self.get_symmetry() == "T":
-            setup.energies = "{}*VRTHFfold1111 + " \
-                             "{}*(VRTHFfold1111:VRTHFfold1211) + " \
-                             "{}*(VRTHFfold1111:VRT3fold1111) + " \
-                             "{}*(VRTHFfold1111:VRT2fold1111) + " \
-                             "{}*(VRTHFfold1111:VRT3fold1211)".format(*self.get_energies())
+            setup.energies = "{}*VRTHFfold111_z + " \
+                             "{}*(VRTHFfold111_z:VRTHFfold1211) + " \
+                             "{}*(VRTHFfold111_z:VRT3fold1111) + " \
+                             "{}*(VRTHFfold111_z:VRT2fold1111) + " \
+                             "{}*(VRTHFfold111_z:VRT3fold1211)".format(*self.get_energies())
         else:
-            setup.energies = "{}*VRTHFfold1111 + " \
-                             "{}*(VRTHFfold1111:VRTHFfold1211) + " \
-                             "{}*(VRTHFfold1111:VRTHFfold1311) + " \
-                             "{}*(VRTHFfold1111:VRT3fold1111) + " \
-                             "{}*(VRTHFfold1111:VRT2fold1111) + " \
-                             "{}*(VRTHFfold1111:VRT3fold1211)".format(*self.get_energies())
+            setup.energies = "{}*VRTHFfold111_z + " \
+                             "{}*(VRTHFfold111_z:VRTHFfold121_z) + " \
+                             "{}*(VRTHFfold111_z:VRTHFfold131_z) + " \
+                             "{}*(VRTHFfold111_z:VRT3fold111_z) + " \
+                             "{}*(VRTHFfold111_z:VRT2fold111_z) + " \
+                             "{}*(VRTHFfold111_z:VRT3fold121_z)".format(*self.get_energies())
 
         # finally, in order to be z_angle(0) to be the same for all structures, we rotate the following vrts along their axis
         # "VRTHFfold", "VRT3fold", "VRT2fold".
