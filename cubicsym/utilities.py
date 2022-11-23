@@ -8,8 +8,28 @@ Utility functions
 from Bio.PDB.MMCIFParser import MMCIFParser
 from Bio.PDB.PDBParser import PDBParser
 
+
+
+def cut_all_but_chains(pose, *chains):
+    """Cuts all chain in the pose except for the chains given."""
+    # collect all residues not in the chains of the pose and find the min, max residue number
+    resi_chain_map = {}
+    for resi in range(1, pose.size() + 1):
+        chain = pose.pdb_info().chain(resi)
+        if not chain in chains:
+            if chain not in resi_chain_map:
+                resi_chain_map[chain] = []
+            resi_chain_map[chain].append(resi)
+    ranges = []
+    for k, v in resi_chain_map.items():
+        ranges.append({"min":min(v), "max":max(v)})
+    # now delete from the top and down using the min and max residue number
+    for v in sorted(ranges, key=lambda x: x["max"], reverse=True):
+        pose.delete_residue_range_slow(v["min"], v["max"])
+    return pose
+
 def number_of_chains(file, pdb=True, cif=False):
-    """Returns the number of of chains in the file."""
+    """Returns the number of chains in the file."""
     structure_name = file.split("/")[-1].split(".")[0]
     parser = None
     if pdb == True:
@@ -56,7 +76,7 @@ def mpi_starmap(func, comm, *inputs, files=None):
     # all inputs should be the same len. If there are 3 different sets of lens then fail. If there are 2 sets,
     # then make sure the one set is only len = 1. Then make it the len of the longest
     len_set = set([len(inp) for inp in inputs])
-    assert len(len_set) < 3, "You cannot have 3 different lenghts of inputs"
+    assert len(len_set) < 3, "You cannot have 3 different lengths of inputs"
     if len(len_set) == 2:
         temp_inputs = []
         highest = max(len_set)

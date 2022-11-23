@@ -5,7 +5,7 @@ cubic_from_rosetta.py script
 @Author: Mads Jeppesen
 @Date: 4/6/22
 """
-from cubicsym.assemblyparser import AssemblyParser
+from cubicsym.assembly.assemblyparser import AssemblyParser
 import pathlib
 import textwrap
 import numpy as np

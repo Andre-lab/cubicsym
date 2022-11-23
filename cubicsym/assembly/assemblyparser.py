@@ -15,11 +15,11 @@ from Bio.PDB.MMCIFParser import MMCIFParser
 from Bio.PDB.PDBParser import PDBParser
 from Bio.PDB.Polypeptide import is_aa
 from string import ascii_lowercase, ascii_uppercase
-from cubicsym.mathfunctions import rotation_matrix, vector_angle
-from cubicsym.cubicassembly import CubicSymmetricAssembly
-from cubicsym.assembly import Assembly
+from symmetryhandler.mathfunctions import rotation_matrix, vector_angle
+from cubicsym.assembly.cubicassembly import CubicSymmetricAssembly
+from cubicsym.assembly.assembly import Assembly
 from cubicsym.exceptions import NoSymmetryDetected
-from symmetryhandler.symmetryhandler import SymmetrySetup
+from symmetryhandler.symmetrysetup import SymmetrySetup
 # pyrosetta -> to use from_asymmetric_output
 from pyrosetta import pose_from_file
 from pyrosetta.rosetta.core.pose.datacache import CacheableDataType

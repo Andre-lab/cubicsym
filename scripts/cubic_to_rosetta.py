@@ -9,14 +9,14 @@ import importlib
 import requests
 import numpy as np
 import gzip
-from cubicsym.cubicassembly import CubicSymmetricAssembly
+from cubicsym.assembly.cubicassembly import CubicSymmetricAssembly
 from cubicsym.exceptions import ToHighGeometry, ToHighRMSD
 from pathlib import Path
 from cubicsym.utilities import mpi_starmap, write_string_to_bytearray
 from mpi4py import MPI
 from pyrosetta import pose_from_file, init
 from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
-from symmetryhandler.symmetryhandler import SymmetrySetup
+from symmetryhandler.symmetrysetup import SymmetrySetup
 import pandas as pd
 
 comm = MPI.COMM_WORLD
@@ -118,13 +118,14 @@ def quality_assurance(rosetta_repr, full_repr, input_file, symm_file, pdbid, ass
             io.save(str(parent.joinpath(pdbid + "_aligned_reference.cif")))
 
 def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_outpath, input_names, input_outpath,
-                        rosetta_repr, rosetta_repr_names, rosetta_repr_outpath, full_repr, full_repr_names, full_repr_outpath,
+                        rosetta_repr, rosetta_repr_names, rosetta_repr_outpath, crystal_repr, crystal_repr_names, crystal_repr_outpath,
+                        full_repr, full_repr_names, full_repr_outpath,
                         symmetry_visualization, symmetry_visualization_names, symmetry_visualization_outpath, quality_assurance_on,
                         idealize, report, report_outpath, report_names):
     """Makes a cubic symdef and Rosetta input file and optionally the full cubic structure, the Rosetta representation
     structure and a symmetry visualization script."""
-    for structure, symdef_name, input_name, rosetta_repr_name, full_repr_name, symvis_name, report_name in zip(structures, symdef_names, input_names,
-                                                                        rosetta_repr_names, full_repr_names, symmetry_visualization_names,
+    for structure, symdef_name, input_name, rosetta_repr_name, crystal_repr_name, full_repr_name, symvis_name, report_name in zip(structures, symdef_names, input_names,
+                                                                        rosetta_repr_names, crystal_repr_names, full_repr_names, symmetry_visualization_names,
                                                                                                                report_names):
         print(f"Constructs symmetry for {structure} ")
         results = {"succeded": False,
@@ -133,6 +134,7 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
                    "symdef_name": Path(symdef_outpath).joinpath(symdef_name),
                    "input_name": Path(input_outpath).joinpath(input_name),
                    "rosetta_repr_name":  Path(rosetta_repr_outpath).joinpath(rosetta_repr_name),
+                   "crystal_repr_name":  Path(crystal_repr_outpath).joinpath(crystal_repr_name),
                    "full_repr_name": Path(full_repr_outpath).joinpath(full_repr_name),
                    "symvis_name": Path(symmetry_visualization_outpath).joinpath(symvis_name),
                    "quality_assurance_checked": quality_assurance_on,
@@ -148,11 +150,16 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
             if (results.get("symdef_name").exists() and results.get("input_name").exists()) and not overwrite:
                 print(f"Skips making {results.get('symdef_name')} and {results.get('input_name')} because these files already exists. Pass --overwrite to overwrite files.")
             else:
-                full.output_rosetta_symmetry(str(results.get("symdef_name")), str(results.get("input_name")), idealize=idealize)
+                selected_ids = full.output_rosetta_symmetry(str(results.get("symdef_name")), str(results.get("input_name")), idealize=idealize)
             # Make the Rosetta repr file
+            if crystal_repr:
+                if results.get("crystal_repr_name").exists() and not overwrite:
+                    print(f"Skips making {results.get('crystal_repr_name')} because this file already exist. Pass --overwrite to overwrite files.")
+                else:
+                    full.output(filename=str(results.get("crystal_repr_name")), ids=selected_ids, format="pdb", map_chains_to_ids_in_order=True)
             if rosetta_repr:
                 if results.get("rosetta_repr_name").exists() and not overwrite:
-                    print(f"Skips making  and {results.get('input_name')} because these file already exist.Pass --overwrite to overwrite files.")
+                    print(f"Skips making {results.get('rosetta_repr_name')} because this file already exist. Pass --overwrite to overwrite files.")
                 else:
                     init("-symmetry:initialize_rigid_body_dofs true -detect_disulf false -out:file:output_pose_energies_table false")
                     pose = pose_from_file(str(results.get("input_name")))
@@ -169,7 +176,7 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
             if symmetry_visualization:
                 if results.get("symvis_name").exists() and not overwrite:
                     print(
-                        f"Skips making {results.get('full_repr_name')} because this file already exist. Pass --overwrite to overwrite files.")
+                        f"Skips making {results.get('symvis_name')} because this file already exist. Pass --overwrite to overwrite files.")
                 else:
                     setup = SymmetrySetup()
                     setup.read_from_file(str(results.get("symdef_name")))
@@ -206,7 +213,7 @@ def main():
     parser = argparse.ArgumentParser(description="From a mmcif file containing cubic symmetry information (I/O/T) this script makes a cubic symdef file, "
                                                  "Rosetta input file, and if set, the full cubic representation and the Rosetta "
                                                  "representaion from the protein in the mmcif file(s)")
-    # Input structures
+    # input structures
     parser.add_argument('--structures', help="mmcif files to read.", nargs="+", type=str)
     parser.add_argument('--symmetry', help="Symmetry to generate. Either use 'I', 'O', 'T' or the assembly id number to generate the symmetry from. "
                                            "If 'I', 'O' or 'T' is used the script will iterate through each available assembly, check its symmetry,"
@@ -216,20 +223,24 @@ def main():
     parser.add_argument('--overwrite', help="To overwrite the files (and if set, the report), or not", action="store_true")
     # on/off for output
     parser.add_argument('--rosetta_repr', help="Output the structure that is represented with the symmetryfile.", default=False, type=bool)
+    parser.add_argument('--crystal_repr', help="Output the crystal structure containing only the chains present in the symmetric pose."
+                                               "This can be used for RMSD calcuations.", default=False, type=bool)
     parser.add_argument('--full_repr', help="Output the corresponding cubic structure.", default=False, type=bool)
     parser.add_argument('--symmetry_visualization', help="ouputs a symmetry visualization script that can be used in pymol.",  default=False, type=bool)
     parser.add_argument('--report', help="Output a report file that reports symmetry information", default=False, type=bool)
     # output paths
     parser.add_argument('--symdef_outpath', help="Path to the directory of where to output the symdef files.", default=".", type=str)
     parser.add_argument('--input_outpath', help="Path to the directory of where to output the Rosetta input pdb files.", default=".", type=str)
-    parser.add_argument('--rosetta_repr_outpath', help="Path to the directory of where to output files set with '--rosetta_repr_on' ", default=".", type=str)
-    parser.add_argument('--full_repr_outpath', help="Path to the directory of where to output files set with '--full_repr_on'", default=".", type=str)
-    parser.add_argument('--symmetry_visualization_outpath', help="Path to the directory of where to output files set with '--symmetry_visualization_on'", default=".", type=str)
+    parser.add_argument('--rosetta_repr_outpath', help="Path to the directory of where to output files set with '--rosetta_repr' ", default=".", type=str)
+    parser.add_argument('--crystal_repr_outpath', help="Path to the directory of where to output files set with '--crystal_repr' ", default=".", type=str)
+    parser.add_argument('--full_repr_outpath', help="Path to the directory of where to output files set with '--full_repr'", default=".", type=str)
+    parser.add_argument('--symmetry_visualization_outpath', help="Path to the directory of where to output files set with '--symmetry_visualization'", default=".", type=str)
     parser.add_argument('--report_outpath', help="Path to the directory of where to output the report.", default=".", type=str)
     # output names
     parser.add_argument('--symdef_names', help="Names given to the symmetry files.", default='<prefix>.symm', nargs="+", type=str)
     parser.add_argument('--input_names', help="Name given to input files.", default='<prefix>.cif', nargs="+", type=str)
     parser.add_argument('--rosetta_repr_names', help="Names given to Rosetta representation files.", default='<prefix>_rosetta.pdb', nargs="+", type=str)
+    parser.add_argument('--crystal_repr_names', help="Names given to crystal representation files.", default='<prefix>_crystal.pdb', nargs="+", type=str)
     parser.add_argument('--full_repr_names', help="Names given to full representation files.", default='<prefix>_full.cif', nargs="+", type=str)
     parser.add_argument('--symmetry_visualization_names', help="Names given to symmetry visualization files.", default='<prefix>_symmetry_visualization.py', nargs="+", type=str)
     parser.add_argument('--report_names', help="Names given to report files.", default='<prefix>.csv', nargs="+", type=str)
@@ -247,6 +258,7 @@ def main():
         args.symdef_names = [n if n != "<prefix>.symm" else f"{Path(s).stem}.symm" for n, s in zip([args.symdef_names] * len(args.structures) if isinstance(args.symdef_names, str) else args.symdef_names, args.structures)]
         args.input_names = [n if n != "<prefix>.cif" else f"{Path(s).stem}.cif" for n, s in zip([args.input_names] * len(args.structures) if isinstance(args.input_names, str) else args.input_names, args.structures)]
         args.rosetta_repr_names = [n if n != "<prefix>_rosetta.pdb" else f"{Path(s).stem}_rosetta.pdb" for n, s in zip([args.rosetta_repr_names] * len(args.structures) if isinstance(args.rosetta_repr_names, str) else args.rosetta_repr_names, args.structures)]
+        args.crystal_repr_names = [n if n != "<prefix>_crystal.pdb" else f"{Path(s).stem}_crystal.pdb" for n, s in zip([args.crystal_repr_names] * len(args.structures) if isinstance(args.crystal_repr_names, str) else args.crystal_repr_names, args.structures)]
         args.full_repr_names = [n if n != "<prefix>_full.cif" else f"{Path(s).stem}_full.cif" for n, s in zip([args.full_repr_names] * len(args.structures) if isinstance(args.full_repr_names, str) else args.full_repr_names, args.structures)]
         args.symmetry_visualization_names = [n if n != '<prefix>_symmetry_visualization.py' else f"{Path(s).stem}_symmetry_visualization.py" for n, s in zip([args.symmetry_visualization_names] * len(args.structures) if isinstance(args.symmetry_visualization_names, str) else args.symmetry_visualization_names, args.structures)]
         args.report_names = [n if n != "<prefix>.csv" else f"{Path(s).stem}.csv" for n, s in zip([args.report_names] * len(args.structures) if isinstance(args.report_names, str) else args.report_names, args.structures)]
@@ -257,6 +269,7 @@ def main():
         args.symdef_names = np.array_split(args.symdef_names, size)
         args.input_names = np.array_split(args.input_names, size)
         args.rosetta_repr_names = np.array_split(args.rosetta_repr_names, size)
+        args.crystal_repr_names = np.array_split(args.crystal_repr_names, size)
         args.full_repr_names = np.array_split(args.full_repr_names, size)
         args.symmetry_visualization_names = np.array_split(args.symmetry_visualization_names, size)
         args.report_names = np.array_split(args.report_names, size)
@@ -264,12 +277,14 @@ def main():
     args.symdef_names = comm.scatter(args.symdef_names, root=0)
     args.input_names = comm.scatter(args.input_names, root=0)
     args.rosetta_repr_names = comm.scatter(args.rosetta_repr_names, root=0)
+    args.crystal_repr_names = comm.scatter(args.crystal_repr_names, root=0)
     args.full_repr_names = comm.scatter(args.full_repr_names, root=0)
     args.symmetry_visualization_names = comm.scatter(args.symmetry_visualization_names, root=0)
     args.report_names = comm.scatter(args.report_names, root=0)
 
     make_cubic_symmetry(args.structures, args.symmetry, args.overwrite, args.symdef_names, args.symdef_outpath, args.input_names, args.input_outpath,
-                        args.rosetta_repr, args.rosetta_repr_names, args.rosetta_repr_outpath, args.full_repr, args.full_repr_names, args.full_repr_outpath,
+                        args.rosetta_repr, args.rosetta_repr_names, args.rosetta_repr_outpath, args.crystal_repr, args.crystal_repr_names, args.crystal_repr_outpath,
+                        args.full_repr, args.full_repr_names, args.full_repr_outpath,
                         args.symmetry_visualization, args.symmetry_visualization_names, args.symmetry_visualization_outpath, args.quality_assurance,
                         args.idealize, args.report, args.report_outpath, args.report_names)
 

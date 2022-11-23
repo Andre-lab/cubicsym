@@ -24,14 +24,13 @@ from Bio import SeqIO
 from Bio.PDB.Polypeptide import PPBuilder
 from Bio.SeqRecord import SeqRecord
 from Bio.Align.Applications import MafftCommandline
-from cubicsym.mathfunctions import rotation_matrix, distance
+from symmetryhandler.mathfunctions import rotation_matrix, vector_angle, vector_projection, rotate, vector_projection_on_subspace
+from cubicsym.mathfunctions import distance
 from string import ascii_lowercase, ascii_uppercase
 from Bio.PDB.Polypeptide import is_aa, three_to_one
 from Bio.PDB.Structure import Structure
 from Bio.PDB.vectors import Vector
-from cubicsym.mathfunctions import rotation_matrix, shortest_path, criteria_check, angle, \
-    distance, vector, vector_angle, vector_projection, rotate, vector_projection_on_subspace
-
+from cubicsym.mathfunctions import distance, vector
 
 class Assembly(Structure):
     """A class build on top of the Structure class in BioPython"""
@@ -268,7 +267,30 @@ class Assembly(Structure):
                 print("mapping", next(original_id), "to", subunit.id)
                 chain.id = subunit.id
 
-    def output(self, filename, ids=None, format="cif", same=True, map_subunit_ids_to_chains=False):
+    @staticmethod
+    def _get_rosetta_chain_ordering():
+        """Returns the chain ordering Rosetta used as an iterable including extra numbers. This is the chain ordering Rosetta
+        applies according to src.basic.pymol_chains.hh. I have added extra 10000 numbers to increase the iter so
+        as to not run out of chain labels."""
+        rosetta_chain_ordering = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz!@#$&.<>?]|-_\\~=%")
+        extra_chains = list(map(str, range(10, 10000)))
+        return iter(rosetta_chain_ordering + extra_chains)
+
+    def map_chains_to_ids_in_order(self, subassembly, ids):
+        # first we need to scrample the chains/ids
+        # When creating a subassembly PDBIO/MMCIFIO sorts them by the model id and
+        # for subunit, tmp_id in zip(subassembly.get_subunits(), [i + 100000 for i in ids]):
+        #     subunit.id = tmp_id
+        # for old_id, new_id in zip(ids, range(1, len(ids) + 1)):
+        #     subunit = subassembly.get_subunit_with_id(old_id)
+        #     subunit.id = new_id
+        for chain in subassembly.get_chains():
+            chain.id = ''.join(random.choice(ascii_lowercase) for i in range(10))
+        # then we map
+        for chain, new_id in zip(subassembly.get_chains(), self._get_rosetta_chain_ordering()):
+            chain.id = new_id
+
+    def output(self, filename, ids=None, format="cif", same=True, map_subunit_ids_to_chains=False, map_chains_to_ids_in_order=False):
         """Outputs the assembly to file.
 
         :param filename: The name of the file.
@@ -276,13 +298,17 @@ class Assembly(Structure):
         :param format: format of the output [pdb, cif].
         :param same: have the same serial num or not. If True, PyMOL will by default set cartoon on all subunits.
         :param map_subunit_ids_to_chains: Will label the chains of each subunit as the subunit id. Useful for debugging.
+        :param map_chains_to_ids_in_order: Will label the chains alphabetically (A B C D E etc) in the order of presence in 'ids'. Will
+               also make sure the final output comes out in that order.
         :return: None
         """
+        if map_chains_to_ids_in_order:
+            assert ids is not None, "if 'map_chains_to_ids_in_order' is used, 'ids' has to be specified."
         if map_subunit_ids_to_chains:
             self.map_subunit_id_onto_chains()
         if format == "cif":
             io = MMCIFIO()
-            if ids==None:
+            if ids is None:
                 if same == True:
                     for subunit in self.get_subunits():
                         subunit.serial_num = "1"
@@ -294,7 +320,10 @@ class Assembly(Structure):
                     io.set_structure(self)
                     io.save(filename)
             else:
-                io.set_structure(self.make_sub_assemby(ids, filename))
+                subassembly = self.make_sub_assemby(ids, filename)
+                if map_chains_to_ids_in_order:
+                    self.map_chains_to_ids_in_order(subassembly, ids)
+                io.set_structure(subassembly)
                 io.save(filename)
             # rosetta is awesome so you have to add _citation.title in the end ...
             file = open(filename, "a+")
@@ -302,7 +331,7 @@ class Assembly(Structure):
             file.close()
         elif format == "pdb":
             io = PDBIO()
-            if ids==None:
+            if ids is None:
                 if same == True:
                     for subunit in self.get_subunits():
                         subunit.serial_num = "1"
@@ -314,7 +343,10 @@ class Assembly(Structure):
                     io.set_structure(self)
                     io.save(filename)
             else:
-                io.set_structure(self.make_sub_assemby(ids, filename))
+                subassembly = self.make_sub_assemby(ids, filename)
+                if map_chains_to_ids_in_order:
+                    self.map_chains_to_ids_in_order(subassembly, ids)
+                io.set_structure(subassembly)
                 io.save(filename)
 
     def output_center_of_mass(self, filename, ids=None):
@@ -429,7 +461,7 @@ class Assembly(Structure):
         else:
             if isinstance(ids, str):
                 ids = [ids]
-            return [subunit for subunit in self.get_models() if subunit.id in ids]
+            return [self.get_subunit_with_id(id_) for id_ in ids]
 
     def get_subunit_with_id(self, id):
         """Returns the subunit with the given id.

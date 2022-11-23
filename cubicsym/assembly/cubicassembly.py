@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-CubicAssembly class
+CubicSymmetricAssembly class
 @Author: Mads Jeppesen
 @Date: 4/6/22
 """
@@ -14,10 +14,11 @@ import random
 import string
 import itertools
 from io import StringIO
-from cubicsym.assembly import Assembly
-from cubicsym.mathfunctions import rotation_matrix, shortest_path, criteria_check, angle, \
-    distance, vector, vector_angle, vector_projection, rotate, vector_projection_on_subspace
-from symmetryhandler.symmetryhandler import CoordinateFrame,  SymmetrySetup
+from cubicsym.assembly.assembly import Assembly
+from cubicsym.mathfunctions import shortest_path, criteria_check, angle, distance, vector
+from symmetryhandler.mathfunctions import vector_angle, vector_projection, rotate, vector_projection_on_subspace, rotation_matrix, rotate_right_multiply
+from symmetryhandler.coordinateframe import CoordinateFrame
+from symmetryhandler.symmetrysetup import SymmetrySetup
 from cubicsym.exceptions import ToHighGeometry, ToHighRMSD, ValueToHigh, NoSymmetryDetected
 from pyrosetta.rosetta.std import ostringstream
 from pyrosetta import init, pose_from_file, Pose
@@ -352,7 +353,8 @@ class CubicSymmetricAssembly(Assembly):
         else:
             print(f"Correct symmetry: {self.symmetry} found from assembly id: {self.assembly_id}")
 
-    def output_rosetta_symmetry(self, symmetry_name=None, input_name=None, master_to_use="1", outformat="cif", idealize=True, foldmap:dict=None):
+    def output_rosetta_symmetry(self, symmetry_name=None, input_name=None, master_to_use="1", outformat="cif", idealize=True,
+                                foldmap:dict=None) -> set:
         """Sets up a symmetric representation of a cubic assembly for use in Rosetta.
 
         :param symmetry_name: The name given to the symmetry file (Input to Rosetta)
@@ -367,12 +369,13 @@ class CubicSymmetricAssembly(Assembly):
         if input_name == None:
             input_name = self.id + ".symm"
         start_time = time.time()
-        setup, master = self.setup_symmetry(symmetry_name, master_to_use, idealize=idealize, foldmap=foldmap)
-        print("Writing the output pdb structure that is used in Rosetta (" + input_name + ") to disk. Use this one as input for Rosetta!")
+        setup, master, selected_ids = self.setup_symmetry(symmetry_name, master_to_use, idealize=idealize, foldmap=foldmap)
+        print("Writing the output structure that is used in Rosetta (" + input_name + "." + outformat + ") to disk. Use this one as input for Rosetta!")
         self.output_subunit_as_specified(input_name, master, format=outformat)
         print("Writing the symmetry file (" + symmetry_name + ") to disk.")
         setup.output(symmetry_name)
         print("Symmetry set up in: " + str(round(time.time() - start_time, 1)) + "s")
+        return selected_ids
 
     def get_symmetry(self):
         """Retrieves the symmetry of the cubic assembly. If it hasn't been calculated then it is calculated."""
@@ -390,14 +393,7 @@ class CubicSymmetricAssembly(Assembly):
         self.cmd.run(self.server_root_path + tmp)
         os.remove(tmp)
 
-    @staticmethod
-    def _get_rosetta_chain_ordering():
-        """Returns the chain ordering Rosetta used as an iterable including extra numbers. This is the chain ordering Rosetta
-        applies according to src.basic.pymol_chains.hh. I have added extra 10000 numbers to increase the iter so
-        as to not run out of chain labels."""
-        rosetta_chain_ordering = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz!@#$&.<>?]|-_\\~=%")
-        extra_chains = list(map(str, range(10, 10000)))
-        return iter(rosetta_chain_ordering + extra_chains)
+
 
     def get_highest_fold(self):
         """Get the highest symmetrical fold for the symmetry."""
@@ -459,7 +455,7 @@ class CubicSymmetricAssembly(Assembly):
             for chain in subunit.get_chains():
                 chain.id = next(chain_ordering)
 
-    def has_perfect_symmetry(self,  z1, z2, z3, rtol=1e-6):
+    def has_perfect_symmetry(self,  z1, z2, z3, rtol=1e-9):
         """Checks if the assembly has perfect symmetry by assessing the 3 vectors pointing towards the closest 3 highest fold centers.
         rtol=1e-4 is chosen because this is the accuracy stored in a PDB or MMCIF file."""
         angle = self.facet_angle()
@@ -552,17 +548,17 @@ class CubicSymmetricAssembly(Assembly):
     #     assert self.has_perfect_symmetry(z1, z2_final, z3_final), "Symmetry was not idealized appropiately"
     #     return z2_final, z3_final
 
-    def idealize_vectors(self, z1, z2, z3, rtol=1e-6):
+    def idealize_vectors(self, z1, z2, z3, rtol=1e-9):
         """Idealize the vectors z2 and z3 relative to z1 to achieve perfect I, O or T symmetry."""
         angle = self.facet_angle()
         global_x, global_y, global_z, global_center = self._get_global_center()
         assert np.isclose(z1[0], 0, rtol=rtol) and np.isclose(z1[1], 0, rtol=rtol)
         # Step 1: Set z2 and z3 to be 'angle' away from z1
         angle_diff = vector_angle(z1, z2) - angle
-        z2_new = rotate(z2, rotation_matrix(np.cross(z1, z2), angle_diff))
+        z2_new = rotate(z2, rotation_matrix(np.cross(z1, z2), - angle_diff))
         assert np.isclose(vector_angle(z1, z2_new), angle, rtol=rtol)
         angle_diff = vector_angle(z1, z3) - angle
-        z3_new = rotate(z3, rotation_matrix(np.cross(z1, z3), angle_diff))
+        z3_new = rotate(z3, rotation_matrix(np.cross(z1, z3), - angle_diff))
         assert np.isclose(vector_angle(z1, z3_new), angle, rtol=rtol)
         # Step 2: Set z2 and z3 to be 'angle' away from each other while maintaining their respective 'angle' to z1
         # 2a: project onto z1 plane (same as the vectors spanned by global_x and global_y since we assert z1 == along z axis earlier) and
@@ -573,7 +569,8 @@ class CubicSymmetricAssembly(Assembly):
         angle_diff = vector_angle(z2_new_proj, z3_new_proj) - projected_angle
         # 2b: figure out which way to rotate z2 and z3
         # if True, z2 is to the right else left
-        if self._right_handed_vectors(z2, z3, z1):
+        cross = np.cross(z2_new_proj, z3_new_proj)
+        if vector_angle(cross, z1) > 90:
             # If True the rotation axis points in the opposite direct of z1
             # then rotate z3 in the positive direction and z2 in the negative direction if the angle_diff > 0, else do the opposite
             if angle_diff > 0:
@@ -588,8 +585,8 @@ class CubicSymmetricAssembly(Assembly):
             else:
                 z2_rotdir, z3_rotdir = -1, 1
         # 2c: rotate z2 and z3 with angle / 2 each
-        z2_final = rotate(z2_new, rotation_matrix(z1, (angle_diff / 2) * z2_rotdir))
-        z3_final = rotate(z3_new, rotation_matrix(z1, (angle_diff / 2) * z3_rotdir))
+        z2_final = rotate(z2_new, rotation_matrix(z1, (abs(angle_diff) / 2) * z2_rotdir))
+        z3_final = rotate(z3_new, rotation_matrix(z1, (abs(angle_diff) / 2) * z3_rotdir))
         assert self.has_perfect_symmetry(z1, z2_final, z3_final), "Symmetry was not idealized appropiately"
         print("z1-z2 angle_diff:", vector_angle(z1, z2_final) - angle)
         print("z1-z3 angle_diff:", vector_angle(z1, z3_final) - angle)
@@ -829,7 +826,7 @@ class CubicSymmetricAssembly(Assembly):
         'high' is a substitute for the highest symmetrical fold here and in the code. So the following is given: I: high=5, O: high=4 and T: high=3.
         For I symmetry, for instance, the symmetrical setup will consist of the 3 closets 5-folds. The master subunit will be a part of 1 of
         these 5-folds and all chains present in the 5-fold will be present in the symmetrical setup. A variable number of subunits will
-        be present from the the 2 other 5-folds which can be set by the 'subunits_in_other_highfold' variable which by default is 2.
+        be present from the 2 other 5-folds which can be set by the 'subunits_in_other_highfold' variable which by default is 2.
 
         :param symmetry_name: Name given to the SymmetrySeutp object
         :param master_id: subunit id to use as the master subunit
@@ -918,7 +915,7 @@ class CubicSymmetricAssembly(Assembly):
             for i in range(5, len(si)):
                 suffix = sj + si[i]
                 suffixp = si[i - 1] if i == 5 else sj + si[i - 1]
-                x, y, z, origo = rotate(reversed_global_x, rt), rotate(global_y, rt), rotate(reversed_global_z, rt), global_center
+                x, y, z, origo = rotate_right_multiply(reversed_global_x, rt), rotate_right_multiply(global_y, rt), rotate_right_multiply(reversed_global_z, rt), global_center
                 if "1_x_rref" == si[i]:
                     setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, x)))
                 elif "1_y_rref" == si[i]:
@@ -972,7 +969,7 @@ class CubicSymmetricAssembly(Assembly):
         name = "VRT3fold"
         jump = "JUMP3fold"
         for i in range(5):
-            x, y, z = rotate(reversed_global_x, rt_from_global_z), rotate(global_y, rt_from_global_z), rotate(reversed_global_z, rt_from_global_z)
+            x, y, z = rotate_right_multiply(reversed_global_x, rt_from_global_z), rotate_right_multiply(global_y, rt_from_global_z), rotate_right_multiply(reversed_global_z, rt_from_global_z)
             origo = global_center
             if "1_z_tref" == si[i]:
                 setup.add_vrt(CoordinateFrame(name + si[i], x, y, z, self.add_along_vector(origo, z, dir=1)))
@@ -998,7 +995,7 @@ class CubicSymmetricAssembly(Assembly):
             for i in range(5, len(si)):
                 suffix = sj + si[i]
                 suffixp = si[i - 1] if i == 5 else sj + si[i - 1]
-                x, y, z, origo = rotate(reversed_global_x, rt), rotate(global_y, rt), rotate(reversed_global_z, rt), global_center
+                x, y, z, origo = rotate_right_multiply(reversed_global_x, rt), rotate_right_multiply(global_y, rt), rotate_right_multiply(reversed_global_z, rt), global_center
                 if "1_x_rref" == si[i]:
                     setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, x)))
                 elif "1_y_rref" == si[i]:
@@ -1023,7 +1020,7 @@ class CubicSymmetricAssembly(Assembly):
         name = "VRT2fold"
         jump = "JUMP2fold"
         for i in range(5):
-            x, y, z = rotate(reversed_global_x, rt_from_global_z), rotate(global_y, rt_from_global_z), rotate(reversed_global_z, rt_from_global_z)
+            x, y, z = rotate_right_multiply(reversed_global_x, rt_from_global_z), rotate_right_multiply(global_y, rt_from_global_z), rotate_right_multiply(reversed_global_z, rt_from_global_z)
             origo = global_center
             if "1_z_tref" == si[i]:
                 setup.add_vrt(CoordinateFrame(name + si[i], x, y, z, self.add_along_vector(origo, z, dir=1)))
@@ -1050,7 +1047,7 @@ class CubicSymmetricAssembly(Assembly):
             for i in range(5, len(si)):
                 suffix = sj + si[i]
                 suffixp = si[i - 1] if i == 5 else sj + si[i - 1]
-                x, y, z, origo = rotate(reversed_global_x, rt), rotate(global_y, rt), rotate(reversed_global_z, rt), global_center
+                x, y, z, origo = rotate_right_multiply(reversed_global_x, rt), rotate_right_multiply(global_y, rt), rotate_right_multiply(reversed_global_z, rt), global_center
                 if "1_x_rref" == si[i]:
                     setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, self.add_along_vector(origo, x)))
                 elif "1_y_rref" == si[i]:
@@ -1072,9 +1069,9 @@ class CubicSymmetricAssembly(Assembly):
         setup.add_dof(f"JUMPHFfold111_x", 'x', "rotation", 0)
         setup.add_dof(f"JUMPHFfold111_y", 'y', "rotation", 0)
         setup.add_dof(f"JUMPHFfold111_z", 'z', "rotation", 0)
-        setup.add_dof(f"JUMPHFfold111_subunit", 'x', "rotation", 0)
-        setup.add_dof(f"JUMPHFfold111_subunit", 'y', "rotation", 0)
-        setup.add_dof(f"JUMPHFfold111_subunit", 'z', "rotation", 0)
+        # setup.add_dof(f"JUMPHFfold111_subunit", 'x', "rotation", 0)
+        # setup.add_dof(f"JUMPHFfold111_subunit", 'y', "rotation", 0)
+        # setup.add_dof(f"JUMPHFfold111_subunit", 'z', "rotation", 0)
         setup.add_jumpgroup("JUMPGROUP1", f"JUMPHFfold1", "JUMP3fold1", "JUMP2fold1")
         setup.add_jumpgroup("JUMPGROUP2", f"JUMPHFfold1_z", "JUMP3fold1_z", "JUMP2fold1_z")
 
@@ -1094,10 +1091,10 @@ class CubicSymmetricAssembly(Assembly):
         # If T, skip adding bonus to the extra-3-fold subunit since it is the same as the other one
         if self.get_symmetry() == "T":
             setup.energies = "{}*VRTHFfold111_z + " \
-                             "{}*(VRTHFfold111_z:VRTHFfold1211) + " \
-                             "{}*(VRTHFfold111_z:VRT3fold1111) + " \
-                             "{}*(VRTHFfold111_z:VRT2fold1111) + " \
-                             "{}*(VRTHFfold111_z:VRT3fold1211)".format(*self.get_energies())
+                             "{}*(VRTHFfold111_z:VRTHFfold121_z) + " \
+                             "{}*(VRTHFfold111_z:VRT3fold111_z) + " \
+                             "{}*(VRTHFfold111_z:VRT2fold111_z) + " \
+                             "{}*(VRTHFfold111_z:VRT3fold121_z)".format(*self.get_energies())
         else:
             setup.energies = "{}*VRTHFfold111_z + " \
                              "{}*(VRTHFfold111_z:VRTHFfold121_z) + " \
@@ -1152,7 +1149,23 @@ class CubicSymmetricAssembly(Assembly):
         master = self.get_subunit_with_id(master_id).copy()
         master.transform(np.identity(3), adjust)
         # self.rotate_about_axis(global_z, - angle)
-        return setup, master
+
+        selected_ids = self._get_selected_ids(master_high_fold, master_3_fold, furthest_2fold_id, closest_2fold_id,  second_high_fold, third_high_fold,
+                                z3high, z2high, z1high)
+
+        return setup, master, selected_ids
+
+    def _get_selected_ids(self, master_high_fold, master_3_fold, furthest_2fold_id, closest_2fold_id,  second_high_fold, third_high_fold,
+                          z3high, z2high, z1high):
+        """Returns the ids that are selected from the assembly. Returns them in such an order that the chain numbers matches exactly in
+        Rosetta symmetry file."""
+        if closest_2fold_id in second_high_fold:
+            closest_3fold_id = [i for i in second_high_fold if i in master_3_fold]
+            furtest_3fold_id = [i for i in third_high_fold if i in master_3_fold]
+        else:
+            closest_3fold_id = [i for i in third_high_fold if i in master_3_fold]
+            furtest_3fold_id = [i for i in second_high_fold if i in master_3_fold]
+        return master_high_fold + furtest_3fold_id + [furthest_2fold_id] + [closest_2fold_id] + closest_3fold_id
 
     def get_angle_to_I_facet(self, z1high, z2high, z3high, master_id):
         z1high_to_hf_center = vector((z1high + z2high + z3high) / 3, z1high)
