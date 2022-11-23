@@ -1,5 +1,5 @@
 # cubicsym
-Tools for using cubic symmetry with Rosetta
+This package provides various tools for using and modelling cubic symmetry with Rosetta. Only the essential functionialities for an enduser is documented below
 
 ## Generating cubic symmetry files
 
