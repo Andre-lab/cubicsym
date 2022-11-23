@@ -4,6 +4,8 @@ This package provides various tools for using and modelling cubic symmetry with 
 The main functionialities are documented below:
 
 1. Generating cubic symmetry files
+2. Generating ensembles for use with EvoDOCK
+3. Generating 
 
 ## Generating cubic symmetry files
 
