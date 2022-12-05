@@ -1,6 +1,7 @@
 # cubicsym
 This package provides various tools for using and modelling cubic symmetry with Rosetta. 
 
+
 The main functionialities are documented below:
 
 1. Generating cubic symmetry files
@@ -14,3 +15,8 @@ The main functionialities are documented below:
 ```python cubic_to_rosetta.py --help```
 
 To see how to use it. 
+
+# install
+at some point run this: 
+
+conda install -c bioconda mafft
