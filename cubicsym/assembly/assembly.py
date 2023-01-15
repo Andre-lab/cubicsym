@@ -6,7 +6,6 @@ Assembly class
 @Date: 4/6/22
 """
 import warnings
-
 import Bio
 import re
 import os
@@ -35,143 +34,90 @@ from cubicsym.mathfunctions import distance, vector
 class Assembly(Structure):
     """A class build on top of the Structure class in BioPython"""
 
-    def __init__(self, mmcif=None, assembly_id=None, id_="1", pdb=None, rosetta_asymmetric_units=None):
+    def __init__(self, mmcif=None, assembly_id=None, id_="1", rosetta_units=None, ignore_chains=None):
         """Creates an Assembly object from a mmcif file and the assembly id
 
         :param mmcif: MMCIF File to create the Assembly from.
         :param assembly_id: The assembly id to use for generation of the Assembly.
         :param id_: The BioPython id given to the assembly
         :param pdb: PDB file to create the assembly from.
-        :param rosetta_asymmetric_units: Determines which chains are grouped into Rosetta specific asymmetric units.
-        This is not related to the crystallographic asymmetric unit but the asymmetric unit as it is modelled in Rosetta when applying
-        symmetry. It is the unit that is symmetrized in either I, O or T symmetry and is equivalent to the input file used when applying
-        symmetry in Rosetta. This code always copies each asymmetric unit:
-        - 60 times for an Icosahedron.
-        - 24 times for an Octahedron.
-        - 12 times for a Tetrahedron.
-        The input protein therefore has to be conform to this convention. A 120-mer icosahedron therefor has to group 2 chains together,
-        a 72-mer octahedron has to group 3 chains together and so forth.
-        The code auto detects this to some degree but can potentially fail depending on the information given in the file. For a MMCIF file
-        the _struct_asym.id information is used to determine the grouping. Each different id will go into a single group each.
-        If a pdb file is given the code expects there to be the exact amount of chains as groups so 60 chains for an Icosahedron for instance.
-        Parsing rosetta_asymmetric_units only works together with mmcif in order to quide the grouping if the grouping is not happending correctly.
-        Groups are specified on a chain basis where chain names constituting a group are seperated by a ',' and different group seperated
-        by whitespaces.
-
-        Examples of a 60-mer icosahedron
-        --rosetta_asymmetric_units A B C D E F G H I J K L M N ...
-        Examples of a 120-mer icosahedron
-        --rosetta_asymmetric_units A,B C,D E,F G,H I,J K,L M,N ...
+        :param ignore_chains: Will ignore these chains in the input structure
         """
         super().__init__(id_)
         self.cmd = xmlrpclib.ServerProxy('http://localhost:9123')
         self.server_root_path = ""
         self.assembly_id = assembly_id
-        self.rosetta_asymmetric_units = rosetta_asymmetric_units
+        self.rosetta_asymmetric_units = rosetta_units
+        self.ignore_chains = ignore_chains
+        self.chain_ids = iter(list(ascii_uppercase) + list(ascii_lowercase) + [str(i) for i in range(0, 10000)])
         if mmcif and assembly_id:
             self.from_mmcif(mmcif)
-        if pdb and not assembly_id:
-            self.from_pdb(pdb)
+            # chain name and subunit number specifiers
+        # if pdb and not assembly_id:
+        #     self.from_pdb(pdb)
 
-    # FIXME: Only works for single chain subunits
-    def from_pdb(self, file):
-        chain_ids = iter(list(ascii_uppercase) + list(ascii_lowercase) + [str(i) for i in range(0, 10000)])
-        structure = PDBParser(PERMISSIVE=1).get_structure(file, file)
-        for subunit_number, chain in enumerate(structure.get_chains(), 1):
-            subunit = Bio.PDB.Model.Model(f"{subunit_number}")
-            new_chain = chain.copy()
-            # new_chain.transform(r,t) - problem is that it right multiplies!
-            new_chain.id = next(chain_ids)
-            subunit.add(new_chain)
-            self.add(subunit)
-        # now we check if the assembly is valid and return if it is:
-        self._create_sequence_alignment_map()
+    # # FIXME: Only works for single chain subunits
+    # def from_pdb(self, file):
+    #     chain_ids = iter(list(ascii_uppercase) + list(ascii_lowercase) + [str(i) for i in range(0, 10000)])
+    #     structure = PDBParser(PERMISSIVE=1).get_structure(file, file)
+    #     for subunit_number, chain in enumerate(structure.get_chains(), 1):
+    #         subunit = Bio.PDB.Model.Model(f"{subunit_number}")
+    #         new_chain = chain.copy()
+    #         # new_chain.transform(r,t) - problem is that it right multiplies!
+    #         new_chain.id = next(chain_ids)
+    #         subunit.add(new_chain)
+    #         self.add(subunit)
+    #     # now we check if the assembly is valid and return if it is:
+    #     self._create_sequence_alignment_map()
 
-    # TODO: THE USE AUTHOR CHAINS CAN BE AUTOMATIC BY COMPARING THE AUTHOR CHAINS TO LABELS CHAINS TO THE ASYM CHAINS SPECIFIED IN struct_asym lines
-    def from_mmcif(self, file):
-        """Constructs an assembly from a mmcif file."""
+    def get_model(self, mmcif_file):
+        """Retrieves the model from the mmcif_file"""
         for subunit in self.get_subunits():
             self.detach_child(subunit.id)
-        structure_name = Path(file).stem
-        structure = MMCIFParser().get_structure(structure_name, file)
+        structure_name = Path(mmcif_file).stem
+        structure = MMCIFParser().get_structure(structure_name, mmcif_file)
         model = structure[0] # only work with the first model (handles NMR in this case)
-        mmcif_dict = MMCIF2Dict(file)
+        mmcif_dict = MMCIF2Dict(mmcif_file)
+        model = self._reconstruct(mmcif_dict, model) # reconstruct the model so the chain names are easier to handle
+        return model, mmcif_dict
+
+    def get_struct_assembly_details(self, mmcif_dict):
+        """get the _pdbx_struct_assembly.details details from the assembly id"""
+        return mmcif_dict["_pdbx_struct_assembly.details"][self.allowed_ids.index(self.assembly_id)]
+
+    def from_mmcif(self, file, center=True):
+        """Constructs an assembly from a mmcif file."""
+        start_time = time.time()
+        model, mmcif_dict = self.get_model(file)
         self.allowed_ids = mmcif_dict["_pdbx_struct_assembly.id"]
-        try:
-            assin = self.allowed_ids.index(self.assembly_id)
-        except ValueError as e:
-            msg = f"The assembly id {assin} is not found in {file}. The available assembly ids are {', '.join(self.allowed_ids)}"
-            raise ValueError(msg) from e
-        else:
-            start_time = time.time()
-            assembly_details = mmcif_dict["_pdbx_struct_assembly.details"][assin]
-            print("Generating assembly: id=" + self.assembly_id + " type='" + assembly_details + "'")
-            # reconstruct the model so the chain names are easier to handle
-            model = self._reconstruct(mmcif_dict, model)
-            # fetch chains to apply apply_symmetry_to generate the assembly
-            chain_to_apply_symmetry_to = [chain for chain in mmcif_dict["_pdbx_struct_assembly_gen.asym_id_list"][assin].split(",") if
-                                          model.has_id(chain)]
-            # retrieve symmetry operations
-            rotations, translations = self._get_symmetry_operations(assin, mmcif_dict)
-            # create a subunit list outer: [] is the subunits, inner: [] is the chains of the different subunits.
-            asymmetric_chains = {}
-            if self.rosetta_asymmetric_units:
-                rosetta_asymmetric_units = [s.split(",") for s in self.rosetta_asymmetric_units.split(" ")]
-            else:
-                for asym_chain, number in list(zip(mmcif_dict["_struct_asym.id"], mmcif_dict["_struct_asym.entity_id"])):
-                    if not model.has_id(asym_chain):
-                        continue
-                    if not number in asymmetric_chains:
-                        asymmetric_chains[number] = []
-                    asymmetric_chains[number].append(asym_chain)
-                asymmetric_chains = sorted([chains for number, chains in asymmetric_chains.items()], key=len)
-                # FIXME: doesnt account for chainbreaks
-                # Four cases cases:
-                # 1: [(1, ["A", "B", "C"])] - subunit with 1 chain where all other chains are asymmetric partners of that one. example: 1stm
-                # 2: [(1, ["A", "B"]), 2: ["C", "D"])] subunit with many chains but each division have equal length
-                # 3: [(1, ["A"]), 2: ["C", "D"])] subunit with many chains but each division does NOT have equal length: example: 3j17
-                # 4: [(1, ["A", "B", "C"])] - similar to #1 but you want to include all the asymmetrical chains in the subunit: example: 1m1c
-                # if 1 or 2:
-                if all([len(chains) == len(asymmetric_chains[0]) for chains in asymmetric_chains]) and len(rotations) * len(
-                        asymmetric_chains[0]) == 60:
-                    # 1
-                    if len(asymmetric_chains) == 1:
-                        rosetta_asymmetric_units = [[chain] for chain in asymmetric_chains[0]]
-                    # 2
-                    else:
-                        rosetta_asymmetric_units = [list(chains) for chains in zip(*asymmetric_chains)]
-                # if 3 or 4
-                else:
-                    rosetta_asymmetric_units = [[chain for chains in asymmetric_chains for chain in chains]]
-
-            # chain name and subunit number specifiers
-            chain_ids = iter(list(ascii_uppercase) + list(ascii_lowercase) + [str(i) for i in range(0, 10000)])
-
-            subunit_number = 0
-            if len(rotations) == 0 and len(translations) == 0:
-                # just make an identity rotation and translation
-                rotations.append(np.identity(3))
-                translations.append(np.zeros(3))
-                # print("file contains full assembly")
-                # assert (1 == 2)  # just fail here!
-            for symmetry_operation_number, (r, t) in enumerate(zip(rotations, translations), 1):
-                print("applying symmetry operation " + str(symmetry_operation_number) + "/" + str(len(rotations)))
-                for chains in rosetta_asymmetric_units:
+        if self.assembly_id not in self.allowed_ids:
+            msg = f"The assembly id {self.assembly_id} is not found in {file}. The available assembly ids are {', '.join(self.allowed_ids)}"
+            raise ValueError(msg)
+        print("Generating assembly: id=" + self.assembly_id + " type='" + self.get_struct_assembly_details(mmcif_dict) + "'")
+        rotations_list, translations_list, model_chains_list = self._get_symmetry_operations(mmcif_dict, model)
+        subunit_number = 0
+        if len(rotations_list) == 0 and len(translations_list) == 0:
+            rotations_list.append([np.identity(3)])
+            translations_list.append([np.zeros(3)])
+            model_chains_list.append([list(model.get_chains())])
+        for rotations, translations, model_chains in zip(rotations_list, translations_list, model_chains_list):
+            for model_chain in model_chains:
+                for symmetry_operation_number, (r, t) in enumerate(zip(rotations, translations), 1):
+                    print("applying symmetry operation " + str(symmetry_operation_number) + "/" + str(len(rotations)))
                     subunit_number += 1
                     subunit = Bio.PDB.Model.Model(f"{subunit_number}")
-                    for chain in chains:
-                        for model_chain in model.get_chains():
-                            if model_chain.id == chain:
-                                new_chain = model_chain.copy()
-                                # new_chain.transform(r,t) - problem is that it right multiplies!
-                                for atom in new_chain.get_atoms():
-                                    atom.coord = np.dot(r, atom.coord) + t
-                                new_chain.id = next(chain_ids)
-                                subunit.add(new_chain)
+                    new_chain = model_chain.copy()
+                    # new_chain.transform(r,t) - problem is that it right multiplies!
+                    for atom in new_chain.get_atoms():
+                        atom.coord = np.dot(r, atom.coord) + t
+                    new_chain.id = next(self.chain_ids)
+                    subunit.add(new_chain) # todo: You could add directly with self.add but this is a legacy behavior where some code would needed to be un-entagnled to work
                     self.add(subunit)
-                # now we check if the assembly is valid and return if it is:
-            self._create_sequence_alignment_map()
-            print("Created the assembly in: " + str(round(time.time() - start_time, 1)) + "s")
+            # now we check if the assembly is valid and return if it is:
+        self._create_sequence_alignment_map()
+        if center:
+            self.center()
+        print("Created the assembly in: " + str(round(time.time() - start_time, 1)) + "s")
 
     def set_server_proxy(self, string: str):
         """Sets the xmlrpclib ServerProxy with string"""
@@ -682,12 +628,6 @@ class Assembly(Structure):
     def _create_sequence_alignment_map(self):
         """Creates sequence alignment between all the subunits of the assembly. This is alignment in stored in xtra["alignment"].
         It maps the residue index number to """
-
-
-
-
-
-
         # 1. get the sequence for all chains and create a fasta file:
         in_file = f"/tmp/{''.join([str(random.randint(0,9)) for i in range(10)])}.fasta"
         self._write_fasta(in_file)
@@ -712,9 +652,8 @@ class Assembly(Structure):
                 # 60              HYTLQSNGNYKFDQMLLTAQNLPASYNYCRLVSRSLTVRSSTLPGGVYALNGTINAVTFQ
                 #                 ***********************************************************
                 stars += i[16:]
-        # fixme: This is 60?! So only icosahedral specific
-        counter = {i: 0 for i in range(1, 61)}
-        alignment_map = {i: [] for i in range(1, 61)}
+        counter = {i: 0 for i in range(1, len(self.get_subunits()) + 1)}
+        alignment_map = {i: [] for i in range(1, len(self.get_subunits()) + 1)}
 
         # WE ARE USING ZERO INDEXING!
         for n, star in enumerate(stars):
@@ -791,6 +730,8 @@ class Assembly(Structure):
         for name, residue_name, residue_seq_id, chain_name, coords, bfactor, occupancy, fullname in \
                 zip(atom_name, atom_residue_name, new_atom_residue_seq_id, atom_chain_name,
                     atom_coords, atom_bfactor, atom_occupancy, atom_fullname):
+            if self.ignore_chains is not None and chain_name in self.ignore_chains:
+                continue
             # skip if atom is not part of an amino acid
             if is_aa(residue_name, standard=canonical):
                 # add chain if it does not exist in the new_model
@@ -809,56 +750,53 @@ class Assembly(Structure):
                    pass
         return new_model
 
-    def _get_symmetry_operations(self, pick, mmcif_dict):
-        """
 
-        :param pick:
-        :param mmcif_dict:
+    def _get_symmetry_operations(self, mmcif_dict, model):
+        """Get the symmetry translation and rotations needed to generate the full assembly
+
+        :param mmcif_dict: The mmcif_dict to extract from the symmetry information from
         :return:
         """
-        # fetch symmetry operations numbers to generate the picked assembly
-        symmetry_operations = mmcif_dict["_pdbx_struct_assembly_gen.oper_expression"][pick]
-        if ")(" in symmetry_operations:
-            warnings.warn(f"Code does not yet support combinations of operations such as {symmetry_operations}")
-            return [], []
-        if "(" in symmetry_operations:
-            symmetry_operations = symmetry_operations[1:-1].split(",")
-        else:
-            symmetry_operations = symmetry_operations.split(",")
-        for ele in symmetry_operations[:]:
-            if ele.find("-") != -1:
-                symmetry_operations.remove(ele)
-                start = ele.split("-")[0]
-                end = ele.split("-")[1]
-                for value in range(int(start), int(end) + 1):
-                    symmetry_operations.append(str(value))
-        # What is the benifit of sorting them? This can give rise to value errors if the names are not digits!!
-        # try:
-        #     symmetry_operations.sort(key=int)
-        # except ValueError: # operations consists of non-numbers. Just keep it as it is.
-        #     ...
-
-        # fetch the rotation and translation matrices/vectors of the symmetry operations
-        rm_list = []
-        tv_list = []
-        for operation_number in symmetry_operations:
-            index = mmcif_dict["_pdbx_struct_oper_list.id"].index(operation_number)
-            rm = [[float(mmcif_dict["_pdbx_struct_oper_list.matrix[1][1]"][index]),
-                   float(mmcif_dict["_pdbx_struct_oper_list.matrix[1][2]"][index]),
-                   float(mmcif_dict["_pdbx_struct_oper_list.matrix[1][3]"][index])]]
-            rm += [[float(mmcif_dict["_pdbx_struct_oper_list.matrix[2][1]"][index]),
-                    float(mmcif_dict["_pdbx_struct_oper_list.matrix[2][2]"][index]),
-                    float(mmcif_dict["_pdbx_struct_oper_list.matrix[2][3]"][index])]]
-            rm += [[float(mmcif_dict["_pdbx_struct_oper_list.matrix[3][1]"][index]),
-                    float(mmcif_dict["_pdbx_struct_oper_list.matrix[3][2]"][index]),
-                    float(mmcif_dict["_pdbx_struct_oper_list.matrix[3][3]"][index])]]
-            tv = [float(mmcif_dict["_pdbx_struct_oper_list.vector[1]"][index]),
-                  float(mmcif_dict["_pdbx_struct_oper_list.vector[2]"][index]),
-                  float(mmcif_dict["_pdbx_struct_oper_list.vector[3]"][index])]
-            rm_list.append(rm)
-            tv_list.append(tv)
-
-        return rm_list, tv_list
+        indices_to_use = [n for n, id_ in enumerate(mmcif_dict["_pdbx_struct_assembly_gen.assembly_id"]) if id_ == self.assembly_id]
+        symmetry_operations_list = [sym for n, sym in enumerate(mmcif_dict["_pdbx_struct_assembly_gen.oper_expression"]) if n in indices_to_use]
+        rm_lists, tv_lists = [], []
+        for symmetry_operations in symmetry_operations_list:
+            if ")(" in symmetry_operations:
+                raise NotImplemented(f"Code does not yet support ')(' combinations of operations such as {symmetry_operations}")
+            if "(" in symmetry_operations:
+                symmetry_operations = symmetry_operations[1:-1].split(",")
+            else:
+                symmetry_operations = symmetry_operations.split(",")
+            for ele in symmetry_operations[:]:
+                if ele.find("-") != -1:
+                    symmetry_operations.remove(ele)
+                    start = ele.split("-")[0]
+                    end = ele.split("-")[1]
+                    for value in range(int(start), int(end) + 1):
+                        symmetry_operations.append(str(value))
+            # fetch the rotation and translation matrices/vectors of the symmetry operations
+            rm_list, tv_list = [], []
+            for operation_number in symmetry_operations:
+                index = mmcif_dict["_pdbx_struct_oper_list.id"].index(operation_number)
+                rm = [[float(mmcif_dict["_pdbx_struct_oper_list.matrix[1][1]"][index]),
+                       float(mmcif_dict["_pdbx_struct_oper_list.matrix[1][2]"][index]),
+                       float(mmcif_dict["_pdbx_struct_oper_list.matrix[1][3]"][index])]]
+                rm += [[float(mmcif_dict["_pdbx_struct_oper_list.matrix[2][1]"][index]),
+                        float(mmcif_dict["_pdbx_struct_oper_list.matrix[2][2]"][index]),
+                        float(mmcif_dict["_pdbx_struct_oper_list.matrix[2][3]"][index])]]
+                rm += [[float(mmcif_dict["_pdbx_struct_oper_list.matrix[3][1]"][index]),
+                        float(mmcif_dict["_pdbx_struct_oper_list.matrix[3][2]"][index]),
+                        float(mmcif_dict["_pdbx_struct_oper_list.matrix[3][3]"][index])]]
+                tv = [float(mmcif_dict["_pdbx_struct_oper_list.vector[1]"][index]),
+                      float(mmcif_dict["_pdbx_struct_oper_list.vector[2]"][index]),
+                      float(mmcif_dict["_pdbx_struct_oper_list.vector[3]"][index])]
+                rm_list.append(rm)
+                tv_list.append(tv)
+            rm_lists.append(rm_list)
+            tv_lists.append(tv_list)
+        chain_operations_list = [chain.split(",") for n, chain in enumerate(mmcif_dict["_pdbx_struct_assembly_gen.asym_id_list"]) if n in indices_to_use]
+        model_chains_list = [[chain for chain in model.get_chains() if chain.id in chain_operations] for chain_operations in chain_operations_list]
+        return rm_lists, tv_lists, model_chains_list
 
     def _get_global_center(self):
         """Defines the global center and its coordinate frame."""

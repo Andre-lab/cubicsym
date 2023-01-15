@@ -8,10 +8,11 @@ import numpy as np
 from cubicsym.cubicsetup import CubicSetup
 from symmetryhandler.mathfunctions import vector_projection_on_subspace, vector_angle, rotate_right_multiply, rotation_matrix_from_vector_to_vector, rotate
 from pyrosetta.rosetta.core.pose.symmetry import is_symmetric
-from symmetryhandler.kinematics import set_jumpdof_str_int
+from symmetryhandler.reference_kinematics import set_jumpdof_str_int
 import math
 from pyrosetta.rosetta.core.pose.symmetry import sym_dof_jump_num
 from pyrosetta.rosetta.core.kinematics import Stub, Jump
+from cubicsym.utilities import get_chain_map as util_get_chain_map
 
 class SymDefSwapper:
 
@@ -19,9 +20,8 @@ class SymDefSwapper:
         # store information we need in order to transfer
         assert is_symmetric(pose)
         # todo: get_anchor_resi is/can be static
-        self.foldHF_setup = CubicSetup()
-        self.foldHF_setup.read_from_file(symmetry_file)
-        self.is_righthanded = self.foldHF_setup.is_rightanded()
+        self.foldHF_setup = CubicSetup(symmetry_file)
+        self.is_righthanded = self.foldHF_setup.calculate_if_rightanded()
         self.symmetry_type = self.foldHF_setup.cubic_symmetry_from_setup()
         # self.symmdata = self.init_setup.get_symmdata()
         # self.virutal_coords = {k:v for k,v in self.symmdata.get_virtual_coordinates().items()}
@@ -56,15 +56,7 @@ class SymDefSwapper:
 
     def get_chain_map(self):
         """Returns a list of the mapping between each chain (in Rosetta numbering) for I/O: HF-, 3- and 2-fold or for T: HF- and 2-fold."""
-        if self.symmetry_type == "I":
-            if self.is_righthanded:
-                return [(1, 1, 1), (2, 4, 7), (3, 8, 6), (4, 9, 5), (5, 6, 3), (6, 2, 4), (7, 7, 8), (8, 5, 2), (9, 3, 9)] # 1stm
-            else:
-                return [(1, 1, 1), (2, 4, 3), (3, 8, 5), (4, 9, 6), (5, 6, 7), (6, 3, 4), (7, 5, 8), (8, 7, 2), (9, 2, 9)] # 6s44
-        elif self.symmetry_type == "O":
-            raise NotImplementedError
-        else:
-            raise NotImplementedError
+        util_get_chain_map(self.symmetry_type, self.is_righthanded)
 
     def init_x_vectors(self):
         self.init_HFfold_x_vec = self.get_HFfold_x_vec_from_HFfold()
@@ -126,7 +118,7 @@ class SymDefSwapper:
         """Creates a symmetric pose based on the 3-fold axis."""
         pose3 = self.foldHF_setup.make_asymmetric_pose(poseHF, dont_reset=["JUMPHFfold111_subunit"])
         # As we reuse this function the subunit dofs might change and we want to keep them fixed
-        self.fold3_setup.reset_jumpdofs("JUMP31fold111_subunit")
+        # self.fold3_setup.reset_jumpdofs("JUMP31fold111_subunit")
         self.fold3_setup.make_symmetric_pose(pose3)
         if transfer:
             if self.symmetry_type == "I":
@@ -141,7 +133,7 @@ class SymDefSwapper:
         """Creates a symmetric pose based on the 2-fold axis."""
         pose2 = self.foldHF_setup.make_asymmetric_pose(pose5, dont_reset=["JUMPHFfold111_subunit"])
         # As we reuse this function the subunit dofs might change and we want to keep them fixed
-        self.fold2_setup.reset_jumpdofs("JUMP21fold111_subunit")
+        # self.fold2_setup.reset_jumpdofs("JUMP21fold111_subunit")
         self.fold2_setup.make_symmetric_pose(pose2)
         if transfer:
             self.transfer_HFto2(pose5, pose2)
@@ -205,11 +197,17 @@ class SymDefSwapper:
     def get_2fold_center_from_3fold(self):
         # todo calculation in rosetta and finally make array
         a = np.array(self.fold3_setup.get_vrt("VRT31fold111_z").vrt_orig)
-        if self.symmetry_type in ("I", "O"):
+        if self.symmetry_type in ("I"):
             if self.is_righthanded: # 1stm
                 b = np.array(self.fold3_setup.get_vrt("VRT32fold121_z").vrt_orig)
-            else: # 6S44, also 1MOG
+            else: # 6S44
                 b = np.array(self.fold3_setup.get_vrt("VRT35fold131_z").vrt_orig)
+        elif self.symmetry_type == "O":
+            if self.is_righthanded: # 1AEW
+                b = np.array(self.fold3_setup.get_vrt("VRT32fold121_z").vrt_orig)
+            else: # 1PY3
+                b = np.array(self.fold3_setup.get_vrt("VRT33fold131_z").vrt_orig)
+            # raise NotImplementedError
         elif self.symmetry_type == "T":
             if self.is_righthanded: # 1HOS
                 b = np.array(self.fold3_setup.get_vrt("VRT32fold121_z").vrt_orig)

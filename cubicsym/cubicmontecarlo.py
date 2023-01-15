@@ -65,7 +65,7 @@ class CubicMonteCarlo:
         # if score is better, accept it,
         # if not, accept based on the boltzmann criteria and the current temperature
         if score_diff < 0 or random.uniform(0, 1) < math.exp(- score_diff / self.t):
-            self.last_accepted_score_score = current_score
+            self.last_accepted_score = current_score
             self.last_accepted_positions = self.cubicdofs.get_positions_as_list(pose)
             self.correct_for_best_score()
             self.accepted = True

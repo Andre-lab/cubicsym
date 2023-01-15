@@ -10,6 +10,8 @@ from pyrosetta.rosetta.core.scoring import CA_rmsd
 from shapedesign.src.utilities.alignment import tmalign
 from pyrosetta.rosetta.std import map_unsigned_long_unsigned_long # core::Size, core::Size
 
+from cubicsym.alignment import sequence_alignment_on_chain_set
+
 
 class Matcher:
     """After some experimentation it seems like both of the functions CA_rmsd and tmalign aligns correctly but bases their score
@@ -17,6 +19,9 @@ class Matcher:
     its apply function."""
 
     def get_resis_from_chain(self, pose, chain: int):
+        return list(range(pose.chain_begin(chain), pose.chain_end(chain) + 1))
+
+    def get_sequence_from_chain(self, pose, chain: int):
         return list(range(pose.chain_begin(chain), pose.chain_end(chain) + 1))
 
     def get_resi_combos_from_pose(self, pose, int_combo):
@@ -47,11 +52,14 @@ class Matcher:
             chain_set1 = list(range(1, pose1.num_chains() + 1))
         if chain_set2 is None:
             chain_set2 = list(range(1, pose2.num_chains() + 1))
-        rmsd_map = {} #{k1: {k2: None for k2 in chain_set2} for k1 in chain_set1}
+        rmsd_map = {}
+        alignment = sequence_alignment_on_chain_set(pose1, pose2, chain_set1, chain_set2)
         for chain1 in chain_set1:
-            chain_1_resis = self.get_resis_from_chain(pose1, chain1)
+            idx = "1_" + str(chain1)
+            chain_1_resis = alignment[idx]
             for chain2 in chain_set2:
-                chain_2_resis = self.get_resis_from_chain(pose2, chain2)
+                idx = "2_" + str(chain2)
+                chain_2_resis = alignment[idx]
                 rmsd_map[(chain1, chain2)] = self.CA_rmsd_no_super(pose1, pose2, chain_1_resis, chain_2_resis)
         best_rmsd_map = [k for k,v in sorted(rmsd_map.items(), key = lambda k: k[1])] #[(a, min(b, key=b.get)) for a, b in rmsd_map.items()]
         # now we have to pick from the best until
@@ -60,13 +68,13 @@ class Matcher:
             if match[0] not in [i[0] for i in chain_matches]:
                 if match[1] not in [i[1] for i in chain_matches]:
                     chain_matches.append(match)
-        return chain_matches
+        return chain_matches, alignment
 
-    def get_resis_from_chain_matches(self, pose, pose_ref, chain_match):
+    def get_resis_from_chain_matches(self,  chain_match, alignment):
         resis1, resis2 = [], []
         for (chain1, chain2) in chain_match:
-            resis1 += self.get_resis_from_chain(pose, chain1)
-            resis2 += self.get_resis_from_chain(pose_ref, chain2)
+            resis1 += alignment["1_" + str(chain1)]
+            resis2 += alignment["2_" + str(chain2)]
         return resis1, resis2
 
     def apply(self, pose, pose_ref, pose_chains=None, pose_ref_chains=None, move_poses=False):
@@ -89,8 +97,8 @@ class Matcher:
             initial_pose_ref_resi = self.get_resi_combos_from_pose(pose_ref, pose_ref_chains)
             _ = tmalign(pose, pose_ref, initial_pose_resi, initial_pose_ref_resi)
         # now we align again, now specifying the correct chain mapping. If chains are already specifed as arguments these are used.
-        chain_matches = self.get_chain_matches(pose, pose_ref, chain_set1=pose_chains, chain_set2=pose_ref_chains)
-        pose_resi, pose_ref_resi = self.get_resis_from_chain_matches(pose, pose_ref, chain_matches)
+        chain_matches, alignment = self.get_chain_matches(pose, pose_ref, chain_set1=pose_chains, chain_set2=pose_ref_chains)
+        pose_resi, pose_ref_resi = self.get_resis_from_chain_matches(chain_matches, alignment)
         tmscore = tmalign(pose, pose_ref, pose_resi, pose_ref_resi)
         rmsd = CA_rmsd(pose_ref, pose, self.construct_map_from_resis(pose_ref_resi, pose_resi))
-        return chain_matches, tmscore, rmsd
+        return chain_matches, alignment, tmscore, rmsd

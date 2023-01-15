@@ -10,22 +10,153 @@ import numpy as np
 import copy
 from io import StringIO
 import math
-from scipy.spatial.transform import Rotation as R
 from symmetryhandler.mathfunctions import rotation_matrix, vector_angle, vector_projection_on_subspace
-from symmetryhandler.kinematics import set_jumpdof_str_str, get_dofs
-from pyrosetta.rosetta.core.pose.symmetry import is_symmetric
-from pyrosetta import Pose
-from pyrosetta.rosetta.core.pose.symmetry import extract_asymmetric_unit
 import textwrap
 from cubicsym.utilities import cut_all_but_chains
+from pyrosetta.rosetta.core.scoring import CA_rmsd
+from pyrosetta.rosetta.std import map_unsigned_long_unsigned_long # core::Size, core::Size
+from cubicsym.utilities import get_chain_map as util_get_chain_map
+from cubicsym.utilities import map_hf_right_to_left_hf, map_3f_right_to_left_hf, map_2f_right_to_left_hf
+import yaml
+from pyrosetta import pose_from_file
+from pyrosetta.rosetta.core.scoring import calpha_superimpose_pose
+from pathlib import Path
+from cubicsym.paths import DATA
 
 class CubicSetup(SymmetrySetup):
 
     def __init__(self, file=None, pose=None, symmetry_name=None):
         super().__init__(file, pose, symmetry_name)
-        self.symmetry_type = self.cubic_symmetry_from_setup()
-        self.righthanded = self.is_rightanded()
-        self.chain_map = {k: v for k, v in zip(tuple("ABCDEFGHI"), tuple(range(1, 10)))}
+        self.chain_map_str2int = {k: v for k, v in zip(tuple("ABCDEFGHI"), tuple(range(1, 10)))}
+        self.extract_headers()
+
+    def load_norm_symdef(self, symmetry, fold):
+        self.read_from_file(Path(DATA).joinpath(f"{symmetry}/{symmetry}_{fold}_norm.symm"))
+
+    def extract_headers(self):
+        """Extracts headers from the symmetry file"""
+        righthanded = self.headers.get("righthanded", None)
+        self.righthanded = yaml.safe_load(righthanded) if righthanded is not None else None
+
+    def read_from_file(self, filename, check_for_reference_symmetry=True):
+        super().read_from_file(filename, check_for_reference_symmetry)
+        self.extract_headers()
+
+    def construct_chain_match(self, pose, pose_ref, same_handedness=True):
+        # todo: map both T and O with right handed and left handed - use the tests in cubicsetup todo this!
+        # need a way to tell if an asymmetric pose is left/right-handed. It should be possible from the chains are oriented in space.
+        # are the vrts always in the same positions in space.
+        assert isinstance(self.righthanded, bool), "#righthanded=True/False must be given in the symmetry file."
+        symmetry = self.cubic_symmetry_from_setup()
+
+        if self.is_hf_based():
+            if same_handedness:
+                return [cm[0] for cm in util_get_chain_map(symmetry, self.righthanded)]
+            else:
+                return map_hf_right_to_left_hf(symmetry)
+        elif self.is_3f_based():
+            if same_handedness:
+                return [cm[1] for cm in util_get_chain_map(symmetry, self.righthanded)]
+            else:
+                return map_3f_right_to_left_hf(symmetry)
+        elif self.is_2f_based():
+            if same_handedness:
+                return [cm[2] for cm in util_get_chain_map(symmetry, self.righthanded)]
+            else:
+                return map_2f_right_to_left_hf(symmetry)
+
+        # pose_mapping =
+        # if not same_handedness:
+        #     if not self.righthanded:
+        #         raise NotImplementedError
+        #     pose_new_mapping = map_hf_right_to_left(symmetry)
+        #     pose_mapping = list(np.array(pose_mapping)[np.array(pose_new_mapping) - 1])
+        # return pose_mapping
+
+    def construct_resis_any2hf(self, pose, pose_ref, same_handedness=True):
+        pose_mapping = self.construct_chain_match(pose, pose_ref, same_handedness=same_handedness)
+        resis = [i for ii in [range(pose.chain_begin(c), pose.chain_end(c) + 1) for c in pose_mapping] for i in ii]
+        resis_ref = list(range(1, pose_ref.size() + 1))
+        return resis, resis_ref
+
+    def construct_chain_map_any2hf(self, pose, pose_ref, same_handedness=True):
+        resis, resis_ref = self.construct_resis_any2hf(pose, pose_ref, same_handedness)
+        m = map_unsigned_long_unsigned_long()
+        for resi, resi_ref in zip(resis, resis_ref):
+            m[resi] = resi_ref
+        return m
+
+    # def construct_chain_map_handedness(self, pose, pose_ref):
+    #     # todo: map both T and O with right handed and left handed - use the tests in cubicsetup todo this!
+    #     assert isinstance(self.righthanded, bool), "#righthanded=True/False must be given in the symmetry file."
+    #     chain_map = util_get_chain_map(self.cubic_symmetry_from_setup(), self.righthanded)
+    #     m = map_unsigned_long_unsigned_long()
+    #     if self.is_hf_based():
+    #         index = 0
+    #     elif self.is_3f_based():
+    #         index = 1
+    #     elif self.is_2f_based():
+    #         index = 2
+    #     resis = [i for ii in [range(pose.chain_begin(c), pose.chain_end(c) + 1) for c in [cm[index] for cm in chain_map]] for i in ii]
+    #     resis_ref = list(range(1, pose_ref.size() + 1))
+    #     for resi, resi_ref in zip(resis, resis_ref):
+    #         m[resi] = resi_ref
+    #     return m
+
+    def calpha_superimpose_pose_hf_map(self, pose, pose_ref, same_handedness=True):
+        """Aligns a cubic symmetrical pose onto another pose_ref taking the correct chain mapping into account. It removes the symetry
+        and creates a new asymmetrical pose with reordered chains so that it matches the ordering in pose_ref. It returns the aligned pose."""
+        # lets reconstruct the chains
+        pose_chains = self.construct_chain_match(pose, pose_ref, same_handedness=same_handedness)
+        pose.dump_pdb("/tmp/pose_from.pdb")
+        pose_ref.dump_pdb("/tmp/pose_to.pdb")
+        pose_from = pose_from_file("/tmp/pose_from.pdb")
+        pose_to = pose_from_file("/tmp/pose_to.pdb")
+        split_chains = list(pose_from.split_by_chain())  # [np.array(pose_chains) - 1]
+        chains_in_new_order = [split_chains[i - 1] for i in pose_chains]
+        pose_from_new = chains_in_new_order[0]
+        for n, chain in enumerate(chains_in_new_order[1:], 1):
+            pose_from_new.append_pose_by_jump(chain, pose_from_new.chain_end(n))
+        calpha_superimpose_pose(pose_from_new, pose_to)
+        return pose_from_new
+
+    def CA_rmsd_hf_map(self, pose, pose_ref, same_handedness=True):
+        """Calculates the CA RMSD bewteen pose and pose_ref where the change in chain numbering is taking into account between the
+        HF-, 3- and 2-fold based CubicSetup. The pose CubicSetup must be the same as self and can be either 2-,3- or HF-fold.
+        The CubicSetup of pose_ref must be HF based. The pose_ref can either be the same handedness (left/right) as the pose (which is the
+        default) or it can be opposite. If it is opposite, parse same_handedness=False"""
+        return CA_rmsd(pose, pose_ref, self.construct_chain_map_any2hf(pose, pose_ref, same_handedness=same_handedness))
+
+    # def CA_rmsd_for_different_handedness(self, pose, pose_ref):
+    #     """Calculates the CA RMSD bewteen pose and pose_ref where the difference in handedness (left/right) is taken into account."""
+    #     return CA_rmsd(pose, pose_ref, self.construct_chain_map_any2hf(pose, pose_ref))
+
+    def get_jumpidentifier(self) -> str:
+        """Returns the identifier for the jump names. The movable jump names are given as JUMP<IDENTIFIER>fold<VRTTYPE>."""
+        if self.is_hf_based():
+            return "HF"
+        elif self.is_3f_based():
+            return "31"
+        elif self.is_2f_based():
+            return "21"
+
+    def get_base(self) -> str:
+        """Returns the cubicsetup type as a str"""
+        if self.is_hf_based():
+            return "HF"
+        elif self.is_3f_based():
+            return "3F"
+        elif self.is_2f_based():
+            return "2F"
+
+    def is_hf_based(self):
+        return "JUMPHFfold" in self._jumps.keys()
+
+    def is_3f_based(self):
+        return "JUMP31fold" in self._jumps.keys()
+
+    def is_2f_based(self):
+        return "JUMP21fold" in self._jumps.keys()
 
     def get_HF_chains(self, pose):
         """Get the HF chains of the pose only."""
@@ -44,36 +175,36 @@ class CubicSetup(SymmetrySetup):
 
     def __get_chains_ids(self, ids, rosetta_number):
         if rosetta_number:
-            return tuple([self.chain_map[i] for i in ids])
+            return tuple([self.chain_map_str2int[i] for i in ids])
         return ids
 
     def get_HF_chain_ids(self, rosetta_number=False):
         """Get the HF fold chains names either as a str (default) or Rosetta number."""
-        if "I" == self.symmetry_type:
+        if "I" == self.cubic_symmetry_from_setup():
             return self.__get_chains_ids(tuple("ABCDE"), rosetta_number)
-        if "O" == self.symmetry_type:
+        if "O" == self.cubic_symmetry_from_setup():
             return self.__get_chains_ids(tuple("ABCD"), rosetta_number)
-        if "T" == self.symmetry_type:
+        if "T" == self.cubic_symmetry_from_setup():
             return self.__get_chains_ids(tuple("ABC"), rosetta_number)
 
     def get_3fold_chain_ids(self, rosetta_number=False):
         """Get the 3 fold chains names either as a str (default) or Rosetta number.."""
-        if "I" == self.symmetry_type:
+        if "I" == self.cubic_symmetry_from_setup():
             return self.__get_chains_ids(tuple("AIF"), rosetta_number)
-        if "O" == self.symmetry_type:
+        if "O" == self.cubic_symmetry_from_setup():
             return self.__get_chains_ids(tuple("AEH"), rosetta_number)
-        if "T" == self.symmetry_type:
+        if "T" == self.cubic_symmetry_from_setup():
             return self.__get_chains_ids(tuple("ADG"), rosetta_number)
 
     def get_2fold_chain_ids(self, rosetta_number=False):
         """Get the 2 fold chains names either as a str (default) or Rosetta number. This returns both of the 2 folds.
         The first one is closest and the second one is the furthest."""
 
-        if "I" == self.symmetry_type:
+        if "I" == self.cubic_symmetry_from_setup():
             return self.__get_chains_ids(tuple("AH"), rosetta_number), self.__get_chains_ids(tuple("AG"), rosetta_number)
-        if "O" == self.symmetry_type:
+        if "O" == self.cubic_symmetry_from_setup():
             return self.__get_chains_ids(tuple("AG"), rosetta_number), self.__get_chains_ids(tuple("AF"), rosetta_number)
-        if "T" == self.symmetry_type:
+        if "T" == self.cubic_symmetry_from_setup():
             return self.__get_chains_ids(tuple("AF"), rosetta_number), self.__get_chains_ids(tuple("AE"), rosetta_number)
 
     def cubic_energy_multiplier_from_pose(self, pose) -> int:
@@ -89,12 +220,23 @@ class CubicSetup(SymmetrySetup):
 
     def cubic_symmetry_from_setup(self):
         """Determine the cubic symmetry from a SymmetrySetup object."""
-        if "60" in self.energies:
+        if "60*" in self.energies:
             return "I"
-        elif "24" in self.energies:
+        elif "24*" in self.energies:
             return "O"
-        elif "12" in self.energies:
+        elif "12*" in self.energies:
             return "T"
+        else:
+            raise ValueError("Symmetry is not cubic!")
+
+    def hf_rotation_angle_per_subunit(self):
+        """Determine the cubic symmetry from a SymmetrySetup object."""
+        if "60" in self.energies:
+            return 72
+        elif "24" in self.energies:
+            return 90
+        elif "12" in self.energies:
+            return 120
         else:
             raise ValueError("Symmetry is not cubic!")
 
@@ -496,14 +638,17 @@ class CubicSetup(SymmetrySetup):
         except ValueError:
             raise NotImplementedError("Only works for icosahedral symmetry")
 
-    # fixme: should handle O and T case
     def is_rightanded(self):
         """Returns true if the point fold3_axis going to fold2_axis relative to the foldHF_axis is right-handed. It is left-handed if the cross product fold3_axis X fold2_axis
         points in the same direction as the foldF_axis and right-handed if it points the opposite way with the cutoff being 180/2 degrees."""
-        foldHF_axis = -self.get_vrt("VRTHFfold1").vrt_z
-        fold3_axis = -self.get_vrt("VRT3fold1").vrt_z
-        fold2_axis = -self.get_vrt("VRT2fold1").vrt_z
-        return self._right_handed_vectors(fold3_axis, fold2_axis, foldHF_axis)
+        if self.is_hf_based():
+            foldHF_axis = -self.get_vrt("VRTHFfold1").vrt_z
+            fold3_axis = -self.get_vrt("VRT3fold1").vrt_z
+            fold2_axis = -self.get_vrt("VRT2fold1").vrt_z
+            return self._right_handed_vectors(fold3_axis, fold2_axis, foldHF_axis)
+        else:
+            raise NotImplementedError("This does not work for O 3-fold based symmetry for instance as the left and right hands are identical"
+                                      " and you would have to use previous information of the HF fold from which it was based.")
 
     @staticmethod
     def _create_final_ref_dofs(ss_f, ss_t, ss_f_nb1, ss_f_nb2, ss_t_nb1, ss_t_nb2, R=None, f="rotate",
@@ -550,7 +695,7 @@ class CubicSetup(SymmetrySetup):
         """Based on VRTXfold create: VRTXfold1_z_tref -> VRTXfold (created before) -> VRTXfold1 -> VRTXfold1_z_rref -> VRTXfold1_z """
         ss_t.add_vrt(base_vrt)
         if not R is None:
-            ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold", f"VRT{ss_t_nb1}fold1_z_tref{suffix}", move_origo=True, axis="z",
+            ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{suffix}", f"VRT{ss_t_nb1}fold1_z_tref{suffix}", move_origo=True, axis="z",
                                        dir=1).__getattribute__(f)(R, True))
             # ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{suffix}", f"VRT{ss_t_nb1}fold{suffix}").__getattribute__(f)(R, True))
             ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{suffix}", f"VRT{ss_t_nb1}fold1{suffix}").__getattribute__(f)(R, True))
@@ -558,7 +703,7 @@ class CubicSetup(SymmetrySetup):
                                        axis="z").__getattribute__(f)(R, True))
             ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{suffix}", f"VRT{ss_t_nb1}fold1_z{suffix}").__getattribute__(f)(R, True))
         else:
-            ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold", f"VRT{ss_t_nb1}fold1_z_tref{suffix}", move_origo=True, axis="z", dir=1))
+            ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{suffix}", f"VRT{ss_t_nb1}fold1_z_tref{suffix}", move_origo=True, axis="z", dir=1))
             # ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{suffix}", f"VRT{ss_t_nb1}fold{suffix}"))
             ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{suffix}", f"VRT{ss_t_nb1}fold1{suffix}"))
             ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{suffix}", f"VRT{ss_t_nb1}fold1_z_rref{suffix}", move_origo=True, axis="z"))
@@ -606,6 +751,8 @@ class CubicSetup(SymmetrySetup):
         ss3.reference_symmetric = True
         ss3.symmetry_name = self.symmetry_name + "_3fold_based"
         ss3.anchor = self.anchor
+        ss3.headers = self.headers
+        ss3.righthanded = self.righthanded
         # 1 subunit
         # 2 fivefolds
         # 1 threefold
@@ -837,9 +984,9 @@ class CubicSetup(SymmetrySetup):
         ss3.add_dof(f"JUMP31fold111_x{suffix}", 'x', "rotation", 0)
         ss3.add_dof(f"JUMP31fold111_y{suffix}", 'y', "rotation", 0)
         ss3.add_dof(f"JUMP31fold111_z{suffix}", 'z', "rotation", 0)
-        ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'x', "rotation", 0)
-        ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'y', "rotation", 0)
-        ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'z', "rotation", 0)
+        # ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'x', "rotation", 0)
+        # ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'y', "rotation", 0)
+        # ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'z', "rotation", 0)
         ss3.add_jumpgroup("JUMPGROUP1", f"JUMP31fold1{suffix}", f"JUMP32fold1{suffix}",  f"JUMP33fold1{suffix}",
                           f"JUMP34fold1{suffix}")
         ss3.add_jumpgroup("JUMPGROUP2", f"JUMP31fold1_z{suffix}", f"JUMP32fold1_z{suffix}",
@@ -891,6 +1038,9 @@ class CubicSetup(SymmetrySetup):
         ss2.reference_symmetric = True
         ss2.symmetry_name = self.symmetry_name + "_2fold_based"
         ss2.anchor = self.anchor
+        ss2.headers = self.headers
+        ss2.righthanded = self.righthanded
+
         # 1 subunit
         # 2 fivefolds
         # 1 threefold
@@ -938,7 +1088,7 @@ class CubicSetup(SymmetrySetup):
             R = rotation_matrix(center2, -rot_angle)
         else:
             R = rotation_matrix(center2, rot_angle)
-        is_righthanded = self.is_rightanded()
+        is_righthanded = self.calculate_if_rightanded()
         # if is_righthanded:
         #     R = rotation_matrix(center2, - rot_angle)
         # else:
@@ -1105,9 +1255,9 @@ class CubicSetup(SymmetrySetup):
         ss2.add_dof(f"JUMP21fold111_x{suffix}", 'x', "rotation", 0)
         ss2.add_dof(f"JUMP21fold111_y{suffix}", 'y', "rotation", 0)
         ss2.add_dof(f"JUMP21fold111_z{suffix}", 'z', "rotation", 0)
-        ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'x', "rotation", 0)
-        ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'y', "rotation", 0)
-        ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'z', "rotation", 0)
+        # ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'x', "rotation", 0)
+        # ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'y', "rotation", 0)
+        # ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'z', "rotation", 0)
         ss2.add_jumpgroup("JUMPGROUP1", f"JUMP21fold1{suffix}", f"JUMP22fold1{suffix}", f"JUMP23fold1{suffix}", f"JUMP24fold1{suffix}",
                            f"JUMP25fold1{suffix}", f"JUMP26fold1{suffix}")
         ss2.add_jumpgroup("JUMPGROUP2", f"JUMP21fold1_z{suffix}", f"JUMP22fold1_z{suffix}", f"JUMP23fold1_z{suffix}",
@@ -1140,6 +1290,8 @@ class CubicSetup(SymmetrySetup):
         ss3.reference_symmetric = True
         ss3.symmetry_name = self.symmetry_name + "_3fold_based"
         ss3.anchor = self.anchor
+        ss3.headers = self.headers
+        ss3.righthanded = self.righthanded
         # 1 subunit
         # 2 fivefolds
         # 1 threefold
@@ -1180,7 +1332,7 @@ class CubicSetup(SymmetrySetup):
         R = rotation_matrix(np.cross(center3, - vrt31fold.vrt_z), vector_angle(center3, - vrt31fold.vrt_z))
         vrt31fold.rotate_right_multiply(R)
         # 4) then rotate towards the anchor residue
-        anchor_resi_vec = setup_applied_dofs.get_vrt("VRTHFfold111_z").vrt_orig - center3  # needs to be rotated onto the 3fold plane
+        anchor_resi_vec = setup_applied_dofs.get_vrt(f"VRTHFfold111_z{suffix}").vrt_orig - center3  # needs to be rotated onto the 3fold plane
         rot_angle = vector_angle(anchor_resi_vec, - vrt31fold.vrt_x)
         # find out which way to rotate
         if self._right_handed_vectors(anchor_resi_vec, vrt31fold.vrt_x, center3):
@@ -1190,7 +1342,7 @@ class CubicSetup(SymmetrySetup):
         vrt31fold.rotate_right_multiply(R)
         # ss3.add_jump(f"JUMP31fold{suffix}", f"VRTglobal", f"VRT31fold1_z_tref{suffix}")
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold{suffix}", f"VRT31fold1{suffix}"))
-        ss3._create_base_dofs(ss3, ss3, ss_f_nb1="31", ss_t_nb1="31", base_vrt=vrt31fold)
+        ss3._create_base_dofs(ss3, ss3, ss_f_nb1="31", ss_t_nb1="31", base_vrt=vrt31fold, suffix=suffix)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1{suffix}", f"VRT31fold1_z_tref{suffix}", move_origo=True, axis="z", dir=1))
         # ss3.add_jump(f"JUMP31fold_z_tref{suffix}", f"VRTglobal{suffix}", f"VRT31fold1_z_tref{suffix}")
         # ss3.add_jump(f"JUMP31fold{suffix}", f"VRT31fold1_z_tref{suffix}", f"VRT31fold{suffix}")
@@ -1370,9 +1522,9 @@ class CubicSetup(SymmetrySetup):
         ss3.add_dof(f"JUMP31fold111_x{suffix}", 'x', "rotation", 0)
         ss3.add_dof(f"JUMP31fold111_y{suffix}", 'y', "rotation", 0)
         ss3.add_dof(f"JUMP31fold111_z{suffix}", 'z', "rotation", 0)
-        ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'x', "rotation", 0)
-        ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'y', "rotation", 0)
-        ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'z', "rotation", 0)
+        # ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'x', "rotation", 0)
+        # ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'y', "rotation", 0)
+        # ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'z', "rotation", 0)
         ss3.add_jumpgroup("JUMPGROUP1", f"JUMP31fold1{suffix}", f"JUMP32fold1{suffix}",  f"JUMP33fold1{suffix}")
         ss3.add_jumpgroup("JUMPGROUP2", f"JUMP31fold1_z{suffix}", f"JUMP32fold1_z{suffix}",
                           f"JUMP33fold1_z{suffix}")
@@ -1400,6 +1552,9 @@ class CubicSetup(SymmetrySetup):
         ss2.reference_symmetric = True
         ss2.symmetry_name = self.symmetry_name + "_2fold_based"
         ss2.anchor = self.anchor
+        ss2.headers = self.headers
+        ss2.righthanded = self.righthanded
+
         # 1 subunit
         # 2 fivefolds
         # 1 threefold
@@ -1445,7 +1600,7 @@ class CubicSetup(SymmetrySetup):
             R = rotation_matrix(center2, -rot_angle)
         else:
             R = rotation_matrix(center2, rot_angle)
-        is_righthanded = self.is_rightanded()
+        is_righthanded = self.calculate_if_rightanded()
         # if is_righthanded:
         #     R = rotation_matrix(center2, - rot_angle)
         # else:
@@ -1612,9 +1767,9 @@ class CubicSetup(SymmetrySetup):
         ss2.add_dof(f"JUMP21fold111_x{suffix}", 'x', "rotation", 0)
         ss2.add_dof(f"JUMP21fold111_y{suffix}", 'y', "rotation", 0)
         ss2.add_dof(f"JUMP21fold111_z{suffix}", 'z', "rotation", 0)
-        ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'x', "rotation", 0)
-        ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'y', "rotation", 0)
-        ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'z', "rotation", 0)
+        # ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'x', "rotation", 0)
+        # ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'y', "rotation", 0)
+        # ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'z', "rotation", 0)
         ss2.add_jumpgroup("JUMPGROUP1", f"JUMP21fold1{suffix}", f"JUMP22fold1{suffix}", f"JUMP23fold1{suffix}",
                           f"JUMP24fold1{suffix}", f"JUMP25fold1{suffix}")
         ss2.add_jumpgroup("JUMPGROUP2", f"JUMP21fold1_z{suffix}", f"JUMP22fold1_z{suffix}", f"JUMP23fold1_z{suffix}",
@@ -1648,6 +1803,9 @@ class CubicSetup(SymmetrySetup):
         ss3.reference_symmetric = True
         ss3.symmetry_name = self.symmetry_name + "_3fold_based"
         ss3.anchor = self.anchor
+        ss3.headers = self.headers
+        ss3.righthanded = self.righthanded
+
         # 1 subunit
         # 2 fivefolds
         # 1 threefold
@@ -1875,9 +2033,9 @@ class CubicSetup(SymmetrySetup):
         ss3.add_dof(f"JUMP31fold111_x{suffix}", 'x', "rotation", 0)
         ss3.add_dof(f"JUMP31fold111_y{suffix}", 'y', "rotation", 0)
         ss3.add_dof(f"JUMP31fold111_z{suffix}", 'z', "rotation", 0)
-        ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'x', "rotation", 0)
-        ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'y', "rotation", 0)
-        ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'z', "rotation", 0)
+        # ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'x', "rotation", 0)
+        # ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'y', "rotation", 0)
+        # ss3.add_dof(f"JUMP31fold111_subunit{suffix}", 'z', "rotation", 0)
         ss3.add_jumpgroup("JUMPGROUP1", f"JUMP31fold1{suffix}", f"JUMP32fold1{suffix}", f"JUMP35fold1{suffix}", f"JUMP33fold1{suffix}",
                           f"JUMP34fold1{suffix}")
         ss3.add_jumpgroup("JUMPGROUP2", f"JUMP31fold1_z{suffix}", f"JUMP32fold1_z{suffix}", f"JUMP35fold1_z{suffix}",
@@ -1919,15 +2077,18 @@ class CubicSetup(SymmetrySetup):
         cross = np.cross(np.array(v1 - axis), np.array(v2 - axis))
         return vector_angle(cross, axis) > 90  # True -> It is right-handed
 
-    # fixme: should handle O and T case
-    def is_rightanded(self):
+    def calculate_if_rightanded(self):
         """Returns true if the point fold3_axis going to fold2_axis relative to the foldHF_axis is right-handed. It is left-handed if the cross product fold3_axis X fold2_axis
         points in the same direction as the foldF_axis and right-handed if it points the opposite way with the cutoff being 180/2 degrees."""
-        foldHF_axis = -self.get_vrt("VRTHFfold1").vrt_z
-        fold3_axis = -self.get_vrt("VRT3fold1").vrt_z
-        fold2_axis = -self.get_vrt("VRT2fold1").vrt_z
-        return self._right_handed_vectors(fold3_axis, fold2_axis, foldHF_axis)
-
+        if self.is_hf_based():
+            foldHF_axis = -self.get_vrt("VRTHFfold1").vrt_z
+            fold3_axis = -self.get_vrt("VRT3fold1").vrt_z
+            fold2_axis = -self.get_vrt("VRT2fold1").vrt_z
+            return self._right_handed_vectors(fold3_axis, fold2_axis, foldHF_axis)
+        elif self.is_3f_based():
+            pass
+        elif self.is_2f_based():
+            pass
 
     def create_I_2fold_based_symmetry(self, suffix=''):
         """Creates a 2-fold based symmetry file from a HF-based (CURRENTLY ONLY 5-fold) one."""
@@ -1935,6 +2096,8 @@ class CubicSetup(SymmetrySetup):
         ss2.reference_symmetric = True
         ss2.symmetry_name = self.symmetry_name + "_2fold_based"
         ss2.anchor = self.anchor
+        ss2.headers = self.headers
+        ss2.righthanded = self.righthanded
         # 1 subunit
         # 2 fivefolds
         # 1 threefold
@@ -1979,7 +2142,7 @@ class CubicSetup(SymmetrySetup):
             R = rotation_matrix(center2, -rot_angle)
         else:
             R = rotation_matrix(center2, rot_angle)
-        is_righthanded = self.is_rightanded()
+        is_righthanded = self.calculate_if_rightanded()
         # if is_righthanded:
         #     R = rotation_matrix(center2, - rot_angle)
         # else:
@@ -2146,9 +2309,9 @@ class CubicSetup(SymmetrySetup):
         ss2.add_dof(f"JUMP21fold111_x{suffix}", 'x', "rotation", 0)
         ss2.add_dof(f"JUMP21fold111_y{suffix}", 'y', "rotation", 0)
         ss2.add_dof(f"JUMP21fold111_z{suffix}", 'z', "rotation", 0)
-        ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'x', "rotation", 0)
-        ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'y', "rotation", 0)
-        ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'z', "rotation", 0)
+        # ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'x', "rotation", 0)
+        # ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'y', "rotation", 0)
+        # ss2.add_dof(f"JUMP21fold111_subunit{suffix}", 'z', "rotation", 0)
         ss2.add_jumpgroup("JUMPGROUP1", f"JUMP21fold1{suffix}", f"JUMP22fold1{suffix}", f"JUMP23fold1{suffix}", f"JUMP24fold1{suffix}",
                           f"JUMP25fold1{suffix}", f"JUMP26fold1{suffix}", f"JUMP27fold1{suffix}")
         ss2.add_jumpgroup("JUMPGROUP2", f"JUMP21fold1_z{suffix}", f"JUMP22fold1_z{suffix}", f"JUMP23fold1_z{suffix}",

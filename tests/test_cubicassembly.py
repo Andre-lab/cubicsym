@@ -6,6 +6,35 @@ Tests for the CubicAssembly class
 @Date: 4/6/22
 """
 
+def test_assembly():
+    from cubicsym.assembly.cubicassembly import CubicSymmetricAssembly
+    from cubicsym.assembly.assembly import Assembly
+    for name, sym in zip(("3RCO", "6LPE", "4AM5",), ("T", "O", "O", )):
+        path = f"/home/shared/databases/SYMMETRICAL/{sym}/unrelaxed/native"
+        ca = Assembly(f"{path}/{name}.cif", assembly_id="2")
+        ca.output(f"outputs/{name}_test.cif", map_subunit_ids_to_chains=True)
+        break
+
+def test_cubicassembly():
+    from cubicsym.assembly.cubicassembly import CubicSymmetricAssembly
+    from cubicsym.assembly.assembly import Assembly
+    for name, sym in zip(("4AM5", "6LPE", "3FVB", "3RCO", "2FKA", "6LPE", "4AM5", ), ("O", "O", "O", "T", "T", "O", "O",  )):
+        # "5CY5" har Pseudo Stoichiometry:
+        path = f"/home/shared/databases/SYMMETRICAL/{sym}/unrelaxed/native"
+        ca = CubicSymmetricAssembly(f"{path}/{name}.cif", sym, ignore_chains=["B"] if name == "2FKA" else None)
+        ca.output(f"outputs/{name}_test.cif", map_subunit_ids_to_chains=True)
+        # test in future
+        input_name = f"outputs/{name}.pdb"
+        symmetry_name = f"outputs/{name}.symm"
+        repr_name = f"outputs/{name}_repr.pdb"
+        ico_name = f"outputs/{name}_ico.cif"
+        ico_name_ideal = f"outputs/{name}_ico_ideal.cif"
+        ca.output_rosetta_symmetry(symmetry_name=symmetry_name, input_name=input_name, master_to_use="1", idealize=True, outformat="pdb")
+        create_symmetrical_pose(input_name, symmetry_name, repr_name)
+        ca.output(ico_name)
+        ca_ideal = CubicSymmetricAssembly.from_rosetta_input(input_name, symmetry_name)
+        ca_ideal.output(ico_name_ideal)
+
 def create_symmetrical_pose(input_name, symmetry_name, repr_name, mute=True, outformat="cif"):
     from pyrosetta import init, pose_from_file
     from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
@@ -153,7 +182,7 @@ def test_foldmap():
     name, symmfolder, foldmap, symmetry = "7M2V", "I", {"hf1": ["1", "2", "3", "4", "11"], "hf2": ["5", "16", "14", "13", "10"], "hf3": ["17", "6", "20", "18", "19"],
               "3": ["10", "19", "1"], "21": ["1", "18"], "22": ["1", "13"]}, "I"
     force_symmetry, rosetta_asym_unit = None, None
-    ca = CubicSymmetricAssembly(SYMMETRICAL.joinpath(f"{symmfolder}/unrelaxed/native/{name}.cif"), mmcif_symmetry=symmetry, force_symmetry=force_symmetry, rosetta_asymmetric_units=rosetta_asym_unit)
+    ca = CubicSymmetricAssembly(SYMMETRICAL.joinpath(f"{symmfolder}/unrelaxed/native/{name}.cif"), mmcif_symmetry=symmetry, force_symmetry=force_symmetry, rosetta_units=rosetta_asym_unit)
     input_name = f"outputs/{name}.pdb"
     symmetry_name = f"outputs/{name}.symm"
     repr_name = f"outputs/{name}_repr.pdb"
@@ -176,7 +205,7 @@ def test_afoncubicI():
     ext = "pdb"
     for name, symmfolder, foldmap, symmetry in zip(("1STM", "6S44",  "6RPO", "6JJA",  "6ZLO", "7NO0"), ("I", "I", "I", "I", "I", "I"), (None, None, None, None, None, None), ("I", "I", "I", "I", "I", "I")):
         force_symmetry, rosetta_asym_unit = None, None
-        ca = CubicSymmetricAssembly(SYMMETRICAL.joinpath(f"{symmfolder}/unrelaxed/native/{name}.cif"), mmcif_symmetry=symmetry, force_symmetry=force_symmetry, rosetta_asymmetric_units=rosetta_asym_unit)
+        ca = CubicSymmetricAssembly(SYMMETRICAL.joinpath(f"{symmfolder}/unrelaxed/native/{name}.cif"), mmcif_symmetry=symmetry, force_symmetry=force_symmetry, rosetta_units=rosetta_asym_unit)
         input_name = f"outputs/{name}.{ext}"
         symmetry_name = f"outputs/{name}.symm"
         repr_name = f"outputs/{name}_repr.{ext}"

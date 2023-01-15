@@ -18,6 +18,7 @@ from pyrosetta import pose_from_file, init
 from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
 from symmetryhandler.symmetrysetup import SymmetrySetup
 import pandas as pd
+import sys
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
@@ -121,7 +122,7 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
                         rosetta_repr, rosetta_repr_names, rosetta_repr_outpath, crystal_repr, crystal_repr_names, crystal_repr_outpath,
                         full_repr, full_repr_names, full_repr_outpath,
                         symmetry_visualization, symmetry_visualization_names, symmetry_visualization_outpath, quality_assurance_on,
-                        idealize, report, report_outpath, report_names):
+                        idealize, report, report_outpath, report_names, ignore_chains, main_id, foldmap, output_generated_structure):
     """Makes a cubic symdef and Rosetta input file and optionally the full cubic structure, the Rosetta representation
     structure and a symmetry visualization script."""
     for structure, symdef_name, input_name, rosetta_repr_name, crystal_repr_name, full_repr_name, symvis_name, report_name in zip(structures, symdef_names, input_names,
@@ -145,12 +146,18 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
                    "residues": None,
                    "size": None}
         try:
-            full = CubicSymmetricAssembly(mmcif_file=structure, mmcif_symmetry=symmetry)
+            full = CubicSymmetricAssembly(mmcif_file=structure, mmcif_symmetry=symmetry, ignore_chains=ignore_chains)
+            if output_generated_structure:
+                name = f"{Path(structure).stem}_generated.cif"
+                print("Dumps the generated structure to disk:", name)
+                full.output(name, map_subunit_ids_to_chains=True)
+                return
             # Make the symmetry file and input file
             if (results.get("symdef_name").exists() and results.get("input_name").exists()) and not overwrite:
                 print(f"Skips making {results.get('symdef_name')} and {results.get('input_name')} because these files already exists. Pass --overwrite to overwrite files.")
             else:
-                selected_ids = full.output_rosetta_symmetry(str(results.get("symdef_name")), str(results.get("input_name")), idealize=idealize)
+                selected_ids = full.output_rosetta_symmetry(str(results.get("symdef_name")), str(results.get("input_name")), master_to_use=main_id, idealize=idealize,
+                                                            foldmap=foldmap)
             # Make the Rosetta repr file
             if crystal_repr:
                 if results.get("crystal_repr_name").exists() and not overwrite:
@@ -187,6 +194,8 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
         except ToHighGeometry as e:
             results["failure_reason"] = e.message
         except Exception as e:
+            if not report:
+                raise e
             results["failure_reason"] = e
         if results.get("succeded"):
             if quality_assurance_on:
@@ -219,6 +228,23 @@ def main():
                                            "If 'I', 'O' or 'T' is used the script will iterate through each available assembly, check its symmetry,"
                                            "and return the first instance of the assembly with the corresponding symmetry. If a number is used instead the script will "
                                            "attempt to generate whatever cubic symmetrical structure it corresponds to (if possible).", type=str)
+    parser.add_argument('--output_generated_structure', help="Outputs the generated structure only and the scripts ends."
+                                                             "Useful if specifying subunit numbers through --hf1 or equivalent.", action="store_true")
+    # foldmap options
+    #### FIXME: make them mpi compliant
+    # fixme: have this be chain ids instead of the subunit number in biopython.
+    #  You could force the user to specify only 60 letters and if the person has 120 or 180 subunits 2 or 3 subunits should have
+    #  the same letter
+    parser.add_argument('--hf1', help="The subunit numbers of the HF that the main subunit will consists of.", nargs="+", type=str)
+    parser.add_argument('--hf2', help="The subunit numbers of the second HF. Must be specified together with --hf3.", nargs="+", type=str)
+    parser.add_argument('--hf3', help="The subunit numbers of the third HF. Must be specified together with --hf2.", nargs="+", type=str)
+    parser.add_argument('--f3', help="The subunit numbers of the 3-fold", nargs="+", type=str)
+    parser.add_argument('--f21', help="The subunit numbers of the first 2-fold. Must be specified together with --22.", nargs="+", type=str)
+    parser.add_argument('--f22', help="The subunit numbers of the first 2-fold. Must be specified together with --21.", nargs="+", type=str)
+    # input options
+    parser.add_argument('--ignore_chains', help="Will ignore these chains for all input structures.", nargs="+", type=str)
+    parser.add_argument('--main_id', help="The subunit id for the main subunit", type=str, default="1")
+    ####
     # overwrite
     parser.add_argument('--overwrite', help="To overwrite the files (and if set, the report), or not", action="store_true")
     # on/off for output
@@ -227,7 +253,9 @@ def main():
                                                "This can be used for RMSD calcuations.", default=False, type=bool)
     parser.add_argument('--full_repr', help="Output the corresponding cubic structure.", default=False, type=bool)
     parser.add_argument('--symmetry_visualization', help="ouputs a symmetry visualization script that can be used in pymol.",  default=False, type=bool)
-    parser.add_argument('--report', help="Output a report file that reports symmetry information", default=False, type=bool)
+    parser.add_argument('--report', help="Output a report file that reports symmetry information and any errors occured during the program. "
+                                         "Notice that the program will not exit if an exception occurs. Check the report script for which "
+                                         "error actually occured in that case.", default=False, type=bool)
     # output paths
     parser.add_argument('--symdef_outpath', help="Path to the directory of where to output the symdef files.", default=".", type=str)
     parser.add_argument('--input_outpath', help="Path to the directory of where to output the Rosetta input pdb files.", default=".", type=str)
@@ -282,11 +310,19 @@ def main():
     args.symmetry_visualization_names = comm.scatter(args.symmetry_visualization_names, root=0)
     args.report_names = comm.scatter(args.report_names, root=0)
 
+    # check foldmap options and create the foldmap
+    if (args.hf2 and not args.hf3) or (args.hf3 and not args.hf2):
+        parser.error("if either --hf2 or --hf3 are used they must both be parsed.")
+    if (args.hf2 and not args.hf3) or (args.hf3 and not args.hf2):
+        parser.error("if either --21 or --22 are used they must both be parsed.")
+    foldmap = {k: v for (k,v) in zip(("hf1","hf2", "hf3", "3", "21", "22"), (args.hf1, args.hf2, args.hf3, args.f3, args.f21, args.f22)) if v is not None}
+
+    # run main script
     make_cubic_symmetry(args.structures, args.symmetry, args.overwrite, args.symdef_names, args.symdef_outpath, args.input_names, args.input_outpath,
                         args.rosetta_repr, args.rosetta_repr_names, args.rosetta_repr_outpath, args.crystal_repr, args.crystal_repr_names, args.crystal_repr_outpath,
                         args.full_repr, args.full_repr_names, args.full_repr_outpath,
                         args.symmetry_visualization, args.symmetry_visualization_names, args.symmetry_visualization_outpath, args.quality_assurance,
-                        args.idealize, args.report, args.report_outpath, args.report_names)
+                        args.idealize, args.report, args.report_outpath, args.report_names, args.ignore_chains, args.main_id, foldmap, args.output_generated_structure)
 
 if __name__ == '__main__':
     main()

@@ -41,9 +41,8 @@ class CubicBoundary:
             put at the closest boundary border +/- buffer.
         """
         self.symdef = symdef
-        self.symmetrysetup = CubicSetup()
+        self.symmetrysetup = CubicSetup(symdef)
         self.symmetry_multiplier = self.symmetrysetup.cubic_energy_multiplier_from_pose(pose_at_initial_position)
-        self.symmetrysetup.read_from_file(symdef)
         self.buffer = buffer
         if dofspecification:
             self.dofspecification = dofspecification

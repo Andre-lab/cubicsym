@@ -12,7 +12,7 @@ def test_T_sym():
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from symmetryhandler.reference_kinematics import perturb_jumpdof_str_int
     import random
-    for pdb in ("4CIX", "1H0S", "1MOG"):
+    for pdb in ("7Q03", "1H0S", "1MOG"):
         poseHF, pmm, cmd, symdef = setup_test(name="T", file=pdb, return_symmetry_file=True, mute=True)
         # self.fold3_setup.extract_symmetry_info()
         pmm.keep_history(True)
@@ -53,12 +53,12 @@ def test_O_sym():
     from symmetryhandler.reference_kinematics import perturb_jumpdof_str_int
     from shapedesign.src.utilities.pose import pose_cas_are_identical
     import random
-    poseHF, pmm, cmd, symdef = setup_test(name="O", file="7NTN", return_symmetry_file=True, mute=True)
-    # self.fold3_setup.extract_symmetry_info()
-
-    pmm.keep_history(True)
-    sds = SymDefSwapper(poseHF, symdef)
-    poseHF.pdb_info().name("HF")
+    for pdb in ("1AEW", "1P3Y"):
+        poseHF, pmm, cmd, symdef = setup_test(name="O", file=pdb, return_symmetry_file=True, mute=True)
+        # self.fold3_setup.extract_symmetry_info()
+        pmm.keep_history(True)
+        sds = SymDefSwapper(poseHF, symdef)
+        poseHF.pdb_info().name("HF")
 
     def change_alot_and_transfer(poseHF, sds, atol=1e-1):
         perturb_jumpdof_str_int(poseHF, "JUMPHFfold1", 3, random.uniform(-1, 1))
@@ -93,14 +93,12 @@ def test_I_sym():
     from symmetryhandler.kinematics import perturb_jumpdof
     from shapedesign.src.utilities.pose import pose_cas_are_identical
     import random
-    poseHF, pmm, cmd, symm_file = setup_test(name="I", file="1STM", return_symmetry_file=True)
-    pmm.keep_history(True)
-    sds = SymDefSwapper(poseHF, symm_file)
-    # pose3 = sds.create_3fold_pose_from_5fold(pose5)
-    # pose2 = sds.create_2fold_pose_from_5fold(pose5)
-    # pose5.pdb_info().name("5")
-    # pose3.pdb_info().name("3")
-    # pose2.pdb_info().name("2")
+    for pdb in ("1STM", "6S44"):
+        poseHF, pmm, cmd, symdef = setup_test(name="I", file=pdb, return_symmetry_file=True, mute=True)
+        # self.fold3_setup.extract_symmetry_info()
+        pmm.keep_history(True)
+        sds = SymDefSwapper(poseHF, symdef)
+        poseHF.pdb_info().name("HF")
 
     def change_alot_and_transfer(poseHF, sds, atol=1e-1):
         perturb_jumpdof(poseHF, "JUMPHFfold1", 3, random.uniform(-10, 10))

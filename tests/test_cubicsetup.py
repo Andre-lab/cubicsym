@@ -8,6 +8,21 @@ Test for the CubicSetup class
 import pytest
 import importlib
 
+def test_show_multiple_symmetries():
+    from simpletestlib.test import setup_test
+    from cubicsym.cubicsetup import CubicSetup
+    sym_files = {"I": ["1STM", "1B5S", "1NQW", "6S44", "5CVZ"], # hands: {'1STM': True, '1B5S': True, '1NQW': False, '6S44': False, '5CVZ': True}
+                 "O": ["5GU1", "3R2R", "1BG7", "1AEW", "1P3Y"], # hands: {'5GU1': True, '3R2R': True, '1BG7': True, '1AEW': True, '1P3Y': False}
+                 "T": ["1MOG", "1H0S", "7JRH", "4KIJ", "2VTY"]}
+    for sym, files in sym_files.items():
+        for file in files:
+            pose, pmm, cmd, symdef = setup_test(name=sym, file=file, mute=True, return_symmetry_file=True, reinitialize=False)
+            pmm.keep_history(True)
+            pose.pdb_info().name("org")
+            pmm.apply(pose)
+            setup = CubicSetup(file=symdef)
+            setup.visualize(ip="10.8.0.6", suffix=f"{file}")
+
 def test_handedness():
     from simpletestlib.test import setup_test
     from cubicsym.cubicsetup import CubicSetup
@@ -21,7 +36,7 @@ def test_handedness():
             pose, symdef = setup_test(name=sym, file=file, mute=True, return_symmetry_file=True, pymol=False)
             setup = CubicSetup()
             setup.read_from_file(symdef)
-            answer[file] = setup.is_rightanded()
+            answer[file] = setup.calculate_if_rightanded()
     print(answer)
 
 def test_get_chains():
@@ -46,6 +61,35 @@ def test_get_chains():
             pmm.apply(setup.get_2fold_chains(pose)[0])
             pose.pdb_info().name("2_2")
             pmm.apply(setup.get_2fold_chains(pose)[1])
+    assert True # I have checked that this is consistent!
+
+def test_chain_mapping():
+    from simpletestlib.test import setup_test
+    from cubicsym.cubicsetup import CubicSetup
+    from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
+    from cubicsym.utilities import pose_cas_are_identical, get_chain_map
+    from pyrosetta import init
+    from symmetryhandler.reference_kinematics import set_jumpdof_str_str
+    from cubicsym.actors.symdefswapper import SymDefSwapper
+    sym_files = {"O": ["1AEW", "1P3Y"],
+                 "T": ["1H0S", "1MOG"],
+                 "I": ["1STM", "6S44"]
+                 }
+    for sym, files in sym_files.items():
+        for file, righthanded in zip(files, (True, False)):
+            posehf, pmm, cmd, symdef = setup_test(name=sym, file=file, mute=True, return_symmetry_file=True, symmetrize=True, reinitialize=False)
+            sds = SymDefSwapper(posehf, symdef)
+            posehf.pdb_info().name(f"hf_{file}")
+            pose3f = sds.create_3fold_pose_from_HFfold(posehf)
+            pose3f.pdb_info().name(f"3f_{file}")
+            pose2f = sds.create_2fold_pose_from_HFfold(posehf)
+            pose2f.pdb_info().name(f"2f_{file}")
+            pmm.apply(posehf)
+            pmm.apply(pose3f)
+            pmm.apply(pose2f)
+            assert pose_cas_are_identical(posehf, pose3f, pose2f, map_chains=get_chain_map(sym, righthanded), atol=1e-1), f"{sym} and {file} does not work!"
+
+
     assert True # I have checked that this is consistent!
 
 def test_get_chain_names():

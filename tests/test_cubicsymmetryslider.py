@@ -17,7 +17,7 @@ def test_slide_on_T_sym():
     from simpletestlib.test import setup_test
     import random
     random.seed(661)
-    for pdb in ("1MOG", ):
+    for pdb in ("1MOG", "1H0S"):
         poseo, pmm, cmd, symdef = setup_test(name="T", file=pdb, return_symmetry_file=True, mute=True)
         # make new pose
         pmm.keep_history(True)
@@ -70,7 +70,7 @@ def test_slide_on_O_sym():
     from simpletestlib.test import setup_test
     import random
     random.seed(661)
-    for pdb in ("7NTN", ):
+    for pdb in ("1AEW", "1P3Y"):
         poseo, pmm, cmd, symdef = setup_test(name="O", file=pdb, return_symmetry_file=True, mute=True)
         # make new pose
         pmm.keep_history(True)

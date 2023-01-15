@@ -19,6 +19,7 @@ from cubicsym.mathfunctions import shortest_path, criteria_check, angle, distanc
 from symmetryhandler.mathfunctions import vector_angle, vector_projection, rotate, vector_projection_on_subspace, rotation_matrix, rotate_right_multiply
 from symmetryhandler.coordinateframe import CoordinateFrame
 from symmetryhandler.symmetrysetup import SymmetrySetup
+from cubicsym.cubicsetup import CubicSetup
 from cubicsym.exceptions import ToHighGeometry, ToHighRMSD, ValueToHigh, NoSymmetryDetected
 from pyrosetta.rosetta.std import ostringstream
 from pyrosetta import init, pose_from_file, Pose
@@ -31,7 +32,7 @@ class CubicSymmetricAssembly(Assembly):
     """Cubic symmetrical assembly of either I, O or T symmetry. Has additional methods from a regular assembly related to symmetry."""
 
     def __init__(self, mmcif_file=None, mmcif_symmetry: str = "1", force_symmetry=None, start_rmsd_diff=0.5, start_angles_diff=2.0, id_="1",
-                 rmsd_diff_increment=1, angle_diff_increment=2, total_increments=5, rosetta_asymmetric_units=None):
+                 rmsd_diff_increment=1, angle_diff_increment=2, total_increments=5, rosetta_units=None, ignore_chains=None):
         """Initialization of an instance from an mmCIF file and either a specified symmetry or assembly id.
 
         :param mmcif_file: mmCIF file to create the assembly from.
@@ -53,7 +54,7 @@ class CubicSymmetricAssembly(Assembly):
         """
         assert mmcif_symmetry in ("I", "O", "T") or mmcif_symmetry.isdigit(), \
             "symmetry definition is wrong. Has to be either I, O, T or a number exclusively."
-        super().__init__(mmcif_file, mmcif_symmetry if mmcif_symmetry.isdigit() else "1", id_, rosetta_asymmetric_units)
+        super().__init__(mmcif_file, mmcif_symmetry if mmcif_symmetry.isdigit() else "1", id_, rosetta_units, ignore_chains)
         self.intrinsic_perfect_symmetry = None
         self.idealized_symmetry = None
         self.start_rmsd_diff = start_rmsd_diff
@@ -373,7 +374,7 @@ class CubicSymmetricAssembly(Assembly):
         print("Writing the output structure that is used in Rosetta (" + input_name + "." + outformat + ") to disk. Use this one as input for Rosetta!")
         self.output_subunit_as_specified(input_name, master, format=outformat)
         print("Writing the symmetry file (" + symmetry_name + ") to disk.")
-        setup.output(symmetry_name)
+        setup.output(symmetry_name, headers=[f"righthanded={setup.calculate_if_rightanded()}"])
         print("Symmetry set up in: " + str(round(time.time() - start_time, 1)) + "s")
         return selected_ids
 
@@ -392,8 +393,6 @@ class CubicSymmetricAssembly(Assembly):
         setup.print_visualization(tmp, apply_dofs, mark_jumps)
         self.cmd.run(self.server_root_path + tmp)
         os.remove(tmp)
-
-
 
     def get_highest_fold(self):
         """Get the highest symmetrical fold for the symmetry."""
@@ -837,18 +836,18 @@ class CubicSymmetricAssembly(Assembly):
         biologial assembly.
         :return: SymmetrySetup, Bio.PDB.Structure.Structure object corresponding to the chosen master subunit.
         """
-        setup = SymmetrySetup(symmetry_name=symmetry_name)
+        setup = CubicSetup(symmetry_name=symmetry_name)
         self.center()
         highest_fold = self.get_highest_fold()
         highest_angle = self._get_angle_of_highest_fold()
         # todo: put this earlier and assert that the foldmap makes sense in a function
         if foldmap:
             foldmap_s = self._attach_subunits_to_foldmap(foldmap)
-        if foldmap:
+        if foldmap.get("hf1", False):
             master_high_fold = foldmap.get("hf1")
         else:
             master_high_fold = self.find_X_folds(highest_fold, id=master_id)[0]
-        if foldmap:
+        if foldmap.get("3", False):
             master_3_fold = foldmap.get("3")
         else:
             if highest_fold == 3:
@@ -856,13 +855,13 @@ class CubicSymmetricAssembly(Assembly):
             else:
                 master_3_fold = self.find_X_folds(3, id=master_id, )[0]
         # the 2 other highest-folds that are part of the 3-fold
-        if foldmap:
+        if foldmap.get("hf2", False) and foldmap.get("hf3", False):
             second_high_fold, third_high_fold = foldmap.get("hf2"), foldmap.get("hf3")
         else:
             second_high_fold, third_high_fold = self.find_other_independent_highfolds(highest_fold, master_high_fold, master_3_fold)
         # get the 2 closest 2-folds that are part of the other second or third highest fold
         # closest=10 is arbitary, but we want to make sure we can go through enough
-        if foldmap:
+        if foldmap.get("21", False) and foldmap.get("22", False):
             master_2_folds = [foldmap_s.get("21"), foldmap_s.get("22")]
             self._set_alignment_geometric_center(ids=[s.id for ss in master_2_folds for s in ss])
             master_2_folds.sort(key=lambda ss: shortest_path(*[s.xtra["alignment_geometric_center"] for s in ss]))
@@ -1229,12 +1228,15 @@ class CubicSymmetricAssembly(Assembly):
     def _detect_cubic_symmetry(self):
         """Detects for the following symmetry: Icosahedral (I) or Octahedral (O) or Tetrahedral (T).
         :returns str type of either 'I', 'O' or 'T' if symmetry is found else None."""
-        folds, stypes = (5, 4, 3), ("I", "O", "T")
-        for fold, stype in zip(folds, stypes):
-            xfolds = self.find_X_folds(fold)
-            if xfolds and len(xfolds) > 0:
-                print(f"{stype} symmetry detected")
-                return stype
+        folds, stypes, sizes = (5, 4, 3), ("I", "O", "T"), (60, 24, 12)
+        for fold, stype, size in zip(folds, stypes, sizes):
+            # detect if the size if correct for the symmetry
+            if len(self) == size:
+                # detect if we can find a symmetry fold intrinsic to the symmetry
+                xfolds = self.find_X_folds(fold)
+                if xfolds and len(xfolds) > 0:
+                    print(f"{stype} symmetry detected")
+                    return stype
         print(f"No symmetry dectected")
 
     def get_adequate_subunits(self, subunits, must_contain=None, minimum_folds=None):
