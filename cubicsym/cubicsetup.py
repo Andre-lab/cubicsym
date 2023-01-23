@@ -22,6 +22,8 @@ from pyrosetta import pose_from_file
 from pyrosetta.rosetta.core.scoring import calpha_superimpose_pose
 from pathlib import Path
 from cubicsym.paths import DATA
+from pyrosetta.rosetta.core.pose.symmetry import is_symmetric
+from pyrosetta.rosetta.core.pose.symmetry import sym_dof_jump_num, jump_num_sym_dof
 
 class CubicSetup(SymmetrySetup):
 
@@ -30,13 +32,21 @@ class CubicSetup(SymmetrySetup):
         self.chain_map_str2int = {k: v for k, v in zip(tuple("ABCDEFGHI"), tuple(range(1, 10)))}
         self.extract_headers()
 
+    @staticmethod
+    def get_norm_symdef_path(symmetry, fold):
+        return str(Path(DATA).joinpath(f"{symmetry}/{symmetry}_{fold}_norm.symm"))
+
     def load_norm_symdef(self, symmetry, fold):
-        self.read_from_file(Path(DATA).joinpath(f"{symmetry}/{symmetry}_{fold}_norm.symm"))
+        self.read_from_file(self.get_norm_symdef_path(symmetry, fold))
 
     def extract_headers(self):
         """Extracts headers from the symmetry file"""
         righthanded = self.headers.get("righthanded", None)
         self.righthanded = yaml.safe_load(righthanded) if righthanded is not None else None
+        self.headers.get("normalized", None)
+
+    def is_normalized(self):
+        return eval(self.headers.get("normalized", False))
 
     def read_from_file(self, filename, check_for_reference_symmetry=True):
         super().read_from_file(filename, check_for_reference_symmetry)
@@ -47,7 +57,7 @@ class CubicSetup(SymmetrySetup):
         # need a way to tell if an asymmetric pose is left/right-handed. It should be possible from the chains are oriented in space.
         # are the vrts always in the same positions in space.
         assert isinstance(self.righthanded, bool), "#righthanded=True/False must be given in the symmetry file."
-        symmetry = self.cubic_symmetry_from_setup()
+        symmetry = self.cubic_symmetry()
 
         if self.is_hf_based():
             if same_handedness:
@@ -140,6 +150,47 @@ class CubicSetup(SymmetrySetup):
         elif self.is_2f_based():
             return "21"
 
+    @staticmethod
+    def get_jumpidentifier_from_pose(pose):
+        """Returns the identifier for the jump names from the pose. The movable jump names are given as JUMP<IDENTIFIER>fold<VRTTYPE>."""
+        base = CubicSetup.get_base_from_pose(pose)
+        if base == "HF":
+            return "HF"
+        elif base == "3F":
+            return "31"
+        elif base == "2F":
+            return "21"
+
+    @staticmethod
+    def get_fold_jumpidentifier_from_pose(pose):
+        """Returns the identifier for the jump names from the pose. The movable jump names are given as JUMP<IDENTIFIER>fold<VRTTYPE>."""
+        base = CubicSetup.get_base_from_pose(pose)
+        if base == "HF":
+            return "HF", "3", "2"
+        elif base == "3F":
+            raise NotImplementedError
+            return "31"
+        elif base == "2F":
+            raise NotImplementedError
+            return "21"
+
+    @staticmethod
+    def get_base_from_pose(pose):
+        """Returns the cubicsetup type as a str from a pose."""
+        assert is_symmetric(pose)
+        # get the first jump
+        si = pose.conformation().Symmetry_Info()
+        jump = [si.get_jump_name(k) for n, (k, _) in enumerate(si.get_dofs().items()) if n == 0][0]
+        fold = jump.split("JUMP")[-1].split("fold")[0]
+        if "HF" == fold:
+            return "HF"
+        elif "31" == fold:
+            return "3F"
+        elif "21" == fold:
+            return "2F"
+        else:
+            raise ValueError("pose does not have cubic symmetry")
+
     def get_base(self) -> str:
         """Returns the cubicsetup type as a str"""
         if self.is_hf_based():
@@ -180,31 +231,31 @@ class CubicSetup(SymmetrySetup):
 
     def get_HF_chain_ids(self, rosetta_number=False):
         """Get the HF fold chains names either as a str (default) or Rosetta number."""
-        if "I" == self.cubic_symmetry_from_setup():
+        if "I" == self.cubic_symmetry():
             return self.__get_chains_ids(tuple("ABCDE"), rosetta_number)
-        if "O" == self.cubic_symmetry_from_setup():
+        if "O" == self.cubic_symmetry():
             return self.__get_chains_ids(tuple("ABCD"), rosetta_number)
-        if "T" == self.cubic_symmetry_from_setup():
+        if "T" == self.cubic_symmetry():
             return self.__get_chains_ids(tuple("ABC"), rosetta_number)
 
     def get_3fold_chain_ids(self, rosetta_number=False):
         """Get the 3 fold chains names either as a str (default) or Rosetta number.."""
-        if "I" == self.cubic_symmetry_from_setup():
+        if "I" == self.cubic_symmetry():
             return self.__get_chains_ids(tuple("AIF"), rosetta_number)
-        if "O" == self.cubic_symmetry_from_setup():
+        if "O" == self.cubic_symmetry():
             return self.__get_chains_ids(tuple("AEH"), rosetta_number)
-        if "T" == self.cubic_symmetry_from_setup():
+        if "T" == self.cubic_symmetry():
             return self.__get_chains_ids(tuple("ADG"), rosetta_number)
 
     def get_2fold_chain_ids(self, rosetta_number=False):
         """Get the 2 fold chains names either as a str (default) or Rosetta number. This returns both of the 2 folds.
         The first one is closest and the second one is the furthest."""
 
-        if "I" == self.cubic_symmetry_from_setup():
+        if "I" == self.cubic_symmetry():
             return self.__get_chains_ids(tuple("AH"), rosetta_number), self.__get_chains_ids(tuple("AG"), rosetta_number)
-        if "O" == self.cubic_symmetry_from_setup():
+        if "O" == self.cubic_symmetry():
             return self.__get_chains_ids(tuple("AG"), rosetta_number), self.__get_chains_ids(tuple("AF"), rosetta_number)
-        if "T" == self.cubic_symmetry_from_setup():
+        if "T" == self.cubic_symmetry():
             return self.__get_chains_ids(tuple("AF"), rosetta_number), self.__get_chains_ids(tuple("AE"), rosetta_number)
 
     def cubic_energy_multiplier_from_pose(self, pose) -> int:
@@ -218,7 +269,7 @@ class CubicSetup(SymmetrySetup):
        else:
            raise ValueError("Symmetry is not cubic!")
 
-    def cubic_symmetry_from_setup(self):
+    def cubic_symmetry(self):
         """Determine the cubic symmetry from a SymmetrySetup object."""
         if "60*" in self.energies:
             return "I"
@@ -638,7 +689,7 @@ class CubicSetup(SymmetrySetup):
         except ValueError:
             raise NotImplementedError("Only works for icosahedral symmetry")
 
-    def is_rightanded(self):
+    def calculate_if_rightanded(self):
         """Returns true if the point fold3_axis going to fold2_axis relative to the foldHF_axis is right-handed. It is left-handed if the cross product fold3_axis X fold2_axis
         points in the same direction as the foldF_axis and right-handed if it points the opposite way with the cutoff being 180/2 degrees."""
         if self.is_hf_based():
@@ -646,13 +697,14 @@ class CubicSetup(SymmetrySetup):
             fold3_axis = -self.get_vrt("VRT3fold1").vrt_z
             fold2_axis = -self.get_vrt("VRT2fold1").vrt_z
             return self._right_handed_vectors(fold3_axis, fold2_axis, foldHF_axis)
-        else:
+        elif self.is_3f_based():
             raise NotImplementedError("This does not work for O 3-fold based symmetry for instance as the left and right hands are identical"
                                       " and you would have to use previous information of the HF fold from which it was based.")
 
     @staticmethod
     def _create_final_ref_dofs(ss_f, ss_t, ss_f_nb1, ss_f_nb2, ss_t_nb1, ss_t_nb2, R=None, f="rotate",
-                               suffix=""):  # ss, nb1:str, nb2:str, suffix:str= ""):
+                               suffix="", make_sds=True):  # ss, nb1:str, nb2:str, suffix:str= ""):
+        assert make_sds == True, "We need sds VRT's in the SymDefSwapper class"
         if not R is None:
             ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{ss_f_nb2}_x_rref{suffix}",
                                        f"VRT{ss_t_nb1}fold{ss_t_nb2}_x_rref{suffix}").__getattribute__(f)(R, True))
@@ -669,6 +721,11 @@ class CubicSetup(SymmetrySetup):
             ss_t.add_vrt(
                 ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{ss_f_nb2}_z{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_z{suffix}").__getattribute__(f)(R,
                                                                                                                                       True))
+            # add sds vrt
+            if make_sds:
+                ss_t.add_vrt(
+                    ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{ss_f_nb2}_z{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_sds{suffix}").__getattribute__(f)(R,
+                                                                                                                                          True))
         else:
             ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{ss_f_nb2}_x_rref{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_x_rref{suffix}"))
             ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{ss_f_nb2}_x{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_x{suffix}"))
@@ -676,6 +733,9 @@ class CubicSetup(SymmetrySetup):
             ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{ss_f_nb2}_y{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_y{suffix}"))
             ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{ss_f_nb2}_z_rref{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_z_rref{suffix}"))
             ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{ss_f_nb2}_z{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_z{suffix}"))
+            # add sds vrt
+            if make_sds:
+                ss_t.add_vrt(ss_f.copy_vrt(f"VRT{ss_f_nb1}fold{ss_f_nb2}_z{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_sds{suffix}"))
         ss_t.add_jump(f"JUMP{ss_t_nb1}fold{ss_t_nb2}_x_rref{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}{suffix}",
                       f"VRT{ss_t_nb1}fold{ss_t_nb2}_x_rref{suffix}")
         ss_t.add_jump(f"JUMP{ss_t_nb1}fold{ss_t_nb2}_x{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_x_rref{suffix}",
@@ -688,7 +748,35 @@ class CubicSetup(SymmetrySetup):
                       f"VRT{ss_t_nb1}fold{ss_t_nb2}_z_rref{suffix}")
         ss_t.add_jump(f"JUMP{ss_t_nb1}fold{ss_t_nb2}_z{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_z_rref{suffix}",
                       f"VRT{ss_t_nb1}fold{ss_t_nb2}_z{suffix}")
-        ss_t.add_jump(f"JUMP{ss_t_nb1}fold{ss_t_nb2}_subunit{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_z{suffix}", "SUBUNIT")
+        # add sds jump
+        if make_sds:
+            ss_t.add_jump(f"JUMP{ss_t_nb1}fold{ss_t_nb2}_sds{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_z{suffix}",
+                          f"VRT{ss_t_nb1}fold{ss_t_nb2}_sds{suffix}")
+            ss_t.add_jump(f"JUMP{ss_t_nb1}fold{ss_t_nb2}_subunit{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_sds{suffix}", "SUBUNIT")
+        else:
+            ss_t.add_jump(f"JUMP{ss_t_nb1}fold{ss_t_nb2}_subunit{suffix}", f"VRT{ss_t_nb1}fold{ss_t_nb2}_z{suffix}", "SUBUNIT")
+
+    def straightinator(self, cs):
+        """Makes the last VRT's that control the COM rotation are set identical to their parent VRT '=straighten'. This is
+        important when we flip the subunits during EvoDOCK"""
+        for vrts in [cs.get_downstream_connections(j)[:-2] for j in cs._jumpgroups["JUMPGROUP3"]]:
+            for n, vrt in enumerate(vrts):
+                if n == 0:
+                    vrt_to_copy = copy.deepcopy(cs.get_unapplied_vrt(vrt))
+                else:
+                    vrt_to_replace = cs.get_unapplied_vrt(vrt)
+                    vrt_to_replace._vrt_orig = vrt_to_copy._vrt_orig
+                    vrt_to_replace._vrt_x = vrt_to_copy._vrt_x
+                    vrt_to_replace._vrt_y = vrt_to_copy._vrt_y
+                    vrt_to_replace._vrt_z = vrt_to_copy._vrt_z
+                    if "x_rref" in vrt_to_replace.name:
+                        vrt_to_replace._vrt_orig = self.add_along_vector(vrt_to_replace._vrt_orig, vrt_to_replace._vrt_x)
+                    elif "y_rref" in vrt_to_replace.name:
+                        vrt_to_replace._vrt_orig = self.add_along_vector(vrt_to_replace._vrt_orig, vrt_to_replace._vrt_y)
+                    elif "z_rref" in vrt_to_replace.name:
+                        vrt_to_replace._vrt_orig = self.add_along_vector(vrt_to_replace._vrt_orig, vrt_to_replace._vrt_z)
+                    cs._init_vrts[cs._init_vrts.index(vrt_to_replace)] = vrt_to_replace
+
 
     @staticmethod
     def _create_base_dofs(ss_f, ss_t, ss_f_nb1, ss_t_nb1, base_vrt, R=None, f="rotate", suffix=""):
@@ -742,7 +830,7 @@ class CubicSetup(SymmetrySetup):
 
 
 
-    def create_O_3fold_based_symmetry(self, suffix=""):
+    def create_O_3fold_based_symmetry(self, suffix="", make_sds=True, straighten_COM=True):
 
         # 1: find 3 fold and create a an initial setup based on that. Use the same anchor atom
         # 2: rotate +72 and -72 and include 2 of the chains present in the 5-fold setup
@@ -758,13 +846,17 @@ class CubicSetup(SymmetrySetup):
         # 1 threefold
         # 2 twofolds
         # colors are as given in HF symmetry
+        if make_sds:
+            last = "sds"
+        else:
+            last = "z"
         ss3.energies = " + ".join((
-           f"24*VRT31fold111_z{suffix}", # green
-           f"24*(VRT31fold111_z{suffix}:VRT32fold111_z{suffix})", # ligth blue (4fold closest)
-           f"24*(VRT31fold111_z{suffix}:VRT34fold111_z{suffix})", # pink (4fold furthest)
-           f"24*(VRT31fold111_z{suffix}:VRT31fold121_z{suffix})", # brown (other 3fold)
-           f"12*(VRT31fold111_z{suffix}:VRT32fold121_z{suffix})", # dark blue (2fold closest)
-           f"12*(VRT31fold111_z{suffix}:VRT33fold131_z{suffix})")) # white
+           f"24*VRT31fold111_{last}{suffix}", # green
+           f"24*(VRT31fold111_{last}{suffix}:VRT32fold111_{last}{suffix})", # ligth blue (4fold closest)
+           f"24*(VRT31fold111_{last}{suffix}:VRT34fold111_{last}{suffix})", # pink (4fold furthest)
+           f"24*(VRT31fold111_{last}{suffix}:VRT31fold121_{last}{suffix})", # brown (other 3fold)
+           f"12*(VRT31fold111_{last}{suffix}:VRT32fold121_{last}{suffix})", # dark blue (2fold closest)
+           f"12*(VRT31fold111_{last}{suffix}:VRT33fold131_{last}{suffix})")) # white
 
         setup_applied_dofs = copy.deepcopy(self)
         setup_applied_dofs.apply_dofs()
@@ -823,7 +915,7 @@ class CubicSetup(SymmetrySetup):
         # ss3.add_jump(f"JUMP31fold111_x_tref{suffix}", f"VRT31fold1_z{suffix}", f"VRT31fold111_x_tref{suffix}")
         # ss3.add_jump(f"JUMP31fold11{suffix}", f"VRT31fold111_x_tref{suffix}", f"VRT31fold11{suffix}")
         # ss3.add_jump(f"JUMP31fold111{suffix}", f"VRT31fold11{suffix}", f"VRT31fold111{suffix}")
-        ss3._create_final_ref_dofs(self, ss3, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="111", suffix=suffix)
+        ss3._create_final_ref_dofs(self, ss3, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="111", suffix=suffix, make_sds=make_sds)
         # ---- chain 2 ----
         R = rotation_matrix(center3, 120)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT31fold12{suffix}").rotate_right_multiply(R, True))
@@ -834,7 +926,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="31", ss_t_nb2="2", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="121", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ---- chain 3 ----
         R = rotation_matrix(center3, -120)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT31fold13{suffix}").rotate_right_multiply(R, True))
@@ -844,7 +936,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="31", ss_t_nb2="3", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="131", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
 
         ##############################
         # Create surrounding 3 folds #
@@ -864,7 +956,7 @@ class CubicSetup(SymmetrySetup):
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT32fold11{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold111{suffix}", f"VRT32fold111{suffix}").rotate_right_multiply(R, True))
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="32", ss_t_nb2="111", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT32fold111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT32fold1111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_jump(f"JUMP32fold11{suffix}", f"VRT32fold1{suffix}", f"VRT32fold11{suffix}")
@@ -875,7 +967,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="2", ss_t_nb1="32", ss_t_nb2="2", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="121", ss_t_nb1="32", ss_t_nb2="121", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
 
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold12{suffix}", f"VRT32fold12{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold121{suffix}", f"VRT32fold121{suffix}").rotate_right_multiply(R, True))
@@ -901,7 +993,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="33", ss_t_nb2="1", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="33", ss_t_nb2="111", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT35fold11{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold111{suffix}", f"VRT35fold111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT35fold1111{suffix}").rotate_right_multiply(R, True))
@@ -913,7 +1005,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="3", ss_t_nb1="33", ss_t_nb2="3", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="131", ss_t_nb1="33", ss_t_nb2="131", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold13{suffix}", f"VRT35fold13{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold131{suffix}", f"VRT35fold131{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1311{suffix}", f"VRT35fold1311{suffix}").rotate_right_multiply(R, True))
@@ -941,7 +1033,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="34", ss_t_nb2="1", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="34", ss_t_nb2="111", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT33fold11{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold111{suffix}", f"VRT33fold111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT33fold1111{suffix}").rotate_right_multiply(R, True))
@@ -1003,10 +1095,15 @@ class CubicSetup(SymmetrySetup):
         ss3.add_jumpgroup("JUMPGROUP6", f"JUMP31fold111_z{suffix}", f"JUMP31fold121_z{suffix}", f"JUMP31fold131_z{suffix}",
                           f"JUMP32fold111_z{suffix}", f"JUMP32fold121_z{suffix}",
                           f"JUMP33fold111_z{suffix}", f"JUMP33fold131_z{suffix}", f"JUMP34fold111_z{suffix}")
-        ss3.add_jumpgroup("JUMPGROUP7", f"JUMP31fold111_subunit{suffix}", f"JUMP31fold121_subunit{suffix}",
+        ss3.add_jumpgroup("JUMPGROUP7", f"JUMP31fold111_sds{suffix}", f"JUMP31fold121_sds{suffix}",
+                          f"JUMP31fold131_sds{suffix}", f"JUMP32fold111_sds{suffix}", f"JUMP32fold121_sds{suffix}",
+                          f"JUMP33fold111_sds{suffix}", f"JUMP33fold131_sds{suffix}", f"JUMP34fold111_sds{suffix}")
+        ss3.add_jumpgroup("JUMPGROUP8", f"JUMP31fold111_subunit{suffix}", f"JUMP31fold121_subunit{suffix}",
                           f"JUMP31fold131_subunit{suffix}", f"JUMP32fold111_subunit{suffix}", f"JUMP32fold121_subunit{suffix}",
                           f"JUMP33fold111_subunit{suffix}", f"JUMP33fold131_subunit{suffix}", f"JUMP34fold111_subunit{suffix}")
-
+        ss3._set_init_vrts()
+        if straighten_COM:
+            self.straightinator(ss3)
         return ss3
 
     #         # If T, skip adding bonus to the extra-3-fold subunit since it is the same as the other one
@@ -1032,7 +1129,7 @@ class CubicSetup(SymmetrySetup):
     #         else: # self.get_symmetry() == "T":
     #             return ("12", "12", "12", "6", "6")
 
-    def create_O_2fold_based_symmetry(self, suffix=''):
+    def create_O_2fold_based_symmetry(self, suffix='', make_sds=True, straighten_COM=True):
         """Creates a 2-fold based symmetry file from a HF-based (CURRENTLY ONLY 5-fold) one."""
         ss2 = CubicSetup()
         ss2.reference_symmetric = True
@@ -1045,13 +1142,17 @@ class CubicSetup(SymmetrySetup):
         # 2 fivefolds
         # 1 threefold
         # 2 twofolds
+        if make_sds:
+            last = "sds"
+        else:
+            last = "z"
         ss2.energies = " + ".join((
-           f"24*VRT21fold111_z{suffix}", # green
-           f"24*(VRT21fold111_z{suffix}:VRT24fold111_z{suffix})", # ligth blue (4fold closest)
-           f"24*(VRT21fold111_z{suffix}:VRT23fold111_z{suffix})", # pink (4fold furthest)
-           f"24*(VRT21fold111_z{suffix}:VRT22fold121_z{suffix})", # brown (other 3fold)
-           f"12*(VRT21fold111_z{suffix}:VRT21fold121_z{suffix})", # dark blue (2fold closest)
-           f"12*(VRT21fold111_z{suffix}:VRT25fold111_z{suffix})")) # white
+           f"24*VRT21fold111_{last}{suffix}", # green
+           f"24*(VRT21fold111_{last}{suffix}:VRT24fold111_{last}{suffix})", # ligth blue (4fold closest)
+           f"24*(VRT21fold111_{last}{suffix}:VRT23fold111_{last}{suffix})", # pink (4fold furthest)
+           f"24*(VRT21fold111_{last}{suffix}:VRT22fold121_{last}{suffix})", # brown (other 3fold)
+           f"12*(VRT21fold111_{last}{suffix}:VRT21fold121_{last}{suffix})", # dark blue (2fold closest)
+           f"12*(VRT21fold111_{last}{suffix}:VRT25fold111_{last}{suffix})")) # white
 
         setup_applied_dofs = copy.deepcopy(self)
         setup_applied_dofs.apply_dofs()
@@ -1096,7 +1197,7 @@ class CubicSetup(SymmetrySetup):
         vrt21fold.rotate(R)
         ss2._create_base_dofs(ss2, ss2, ss_f_nb1="21", ss_t_nb1="21", base_vrt=vrt21fold)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="", ss_t_nb1="21", ss_t_nb2="1", suffix=suffix)
-        ss2._create_final_ref_dofs(self, ss2, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="111", suffix=suffix)
+        ss2._create_final_ref_dofs(self, ss2, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="111", suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(vrt21fold)
         # ss2.add_jump(f"JUMP21fold{suffix}", f"VRTglobal{suffix}", f"VRT21fold{suffix}")
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT21fold1{suffix}"))
@@ -1117,7 +1218,7 @@ class CubicSetup(SymmetrySetup):
 
         R = rotation_matrix(center2, 180)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="1", ss_t_nb1="21", ss_t_nb2="2", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="121", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="121", R=R, suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold11{suffix}", f"VRT21fold12{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold111{suffix}", f"VRT21fold121{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1111{suffix}", f"VRT21fold1211{suffix}").rotate(R, True))
@@ -1146,7 +1247,7 @@ class CubicSetup(SymmetrySetup):
         # ss2.add_jump(f"JUMP22fold1{suffix}", f"VRT22fold{suffix}", f"VRT22fold1{suffix}")
         # ---- chain 1 ----
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="1", ss_t_nb1="22", ss_t_nb2="1", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="22", ss_t_nb2="111", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="22", ss_t_nb2="111", R=R, suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold11{suffix}", f"VRT22fold11{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1111{suffix}", f"VRT22fold111{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1111{suffix}", f"VRT22fold1111{suffix}").rotate(R, True))
@@ -1155,7 +1256,7 @@ class CubicSetup(SymmetrySetup):
         # ss2.add_jump(f"JUMP22fold1111{suffix}", f"VRT22fold111{suffix}", f"VRT22fold1111{suffix}")
         # ---- chain 2 ----
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="2", ss_t_nb1="22", ss_t_nb2="2", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="121", ss_t_nb1="22", ss_t_nb2="121", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="121", ss_t_nb1="22", ss_t_nb2="121", R=R, suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold12{suffix}", f"VRT22fold12{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold121{suffix}", f"VRT22fold121{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1211{suffix}", f"VRT22fold1211{suffix}").rotate(R, True))
@@ -1175,7 +1276,7 @@ class CubicSetup(SymmetrySetup):
             vrt_base = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT2{n}fold{suffix}").rotate(R, True)
             ss2._create_base_dofs(ss2, ss2, ss_f_nb1="21", ss_t_nb1=f"2{n}", base_vrt=vrt_base, R=R)
             ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2=f"", ss_t_nb1=f"2{n}", ss_t_nb2=f"1", R=R, suffix=suffix)
-            ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2=f"111", ss_t_nb1=f"2{n}", ss_t_nb2=f"111", R=R, suffix=suffix)
+            ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2=f"111", ss_t_nb1=f"2{n}", ss_t_nb2=f"111", R=R, suffix=suffix, make_sds=make_sds)
 
             # vrt2nfold = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT2{n}fold{suffix}").rotate(R, True)
             # vrt2nfold1 = ss2.copy_vrt(f"VRT21fold1{suffix}", f"VRT2{n}fold1{suffix}").rotate(R, True)
@@ -1200,7 +1301,7 @@ class CubicSetup(SymmetrySetup):
         vrt_base = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT25fold{suffix}").rotate(R, True)
         ss2._create_base_dofs(ss2, ss2, ss_f_nb1="21", ss_t_nb1=f"25", base_vrt=vrt_base, R=R)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="", ss_t_nb1=f"25", ss_t_nb2=f"1", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1=f"25", ss_t_nb2=f"111", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1=f"25", ss_t_nb2=f"111", R=R, suffix=suffix, make_sds=make_sds)
 
         # vrt26fold = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT26fold{suffix}").rotate(R, True)
         # vrt26fold1 = ss2.copy_vrt(f"VRT21fold1{suffix}", f"VRT26fold1{suffix}").rotate(R, True)
@@ -1226,7 +1327,7 @@ class CubicSetup(SymmetrySetup):
         vrt_base = ss2.copy_vrt(f"VRT22fold{suffix}", f"VRT26fold{suffix}").rotate(R, True)
         ss2._create_base_dofs(ss2, ss2, ss_f_nb1="22", ss_t_nb1=f"26", base_vrt=vrt_base, R=R)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="22", ss_f_nb2="", ss_t_nb1=f"26", ss_t_nb2=f"1", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="22", ss_f_nb2="111", ss_t_nb1=f"26", ss_t_nb2=f"111", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="22", ss_f_nb2="111", ss_t_nb1=f"26", ss_t_nb2=f"111", R=R, suffix=suffix, make_sds=make_sds)
         # # ---- create base ----
         # vrt27fold = ss2.copy_vrt(f"VRT22fold{suffix}", f"VRT27fold{suffix}").rotate(R, True)
         # vrt27fold1 = ss2.copy_vrt(f"VRT22fold1{suffix}", f"VRT27fold1{suffix}").rotate(R, True)
@@ -1274,14 +1375,20 @@ class CubicSetup(SymmetrySetup):
         ss2.add_jumpgroup("JUMPGROUP6", f"JUMP21fold111_z{suffix}", f"JUMP21fold121_z{suffix}", f"JUMP22fold111_z{suffix}",
                           f"JUMP22fold121_z{suffix}", f"JUMP23fold111_z{suffix}", f"JUMP24fold111_z{suffix}",
                            f"JUMP25fold111_z{suffix}", f"JUMP26fold111_z{suffix}")
-        ss2.add_jumpgroup("JUMPGROUP7", f"JUMP21fold111_subunit{suffix}", f"JUMP21fold121_subunit{suffix}",
+        ss2.add_jumpgroup("JUMPGROUP7", f"JUMP21fold111_sds{suffix}", f"JUMP21fold121_sds{suffix}",
+                          f"JUMP22fold111_sds{suffix}", f"JUMP22fold121_sds{suffix}", f"JUMP23fold111_sds{suffix}",
+                          f"JUMP24fold111_sds{suffix}", f"JUMP25fold111_sds{suffix}",
+                          f"JUMP26fold111_sds{suffix}")
+        ss2.add_jumpgroup("JUMPGROUP8", f"JUMP21fold111_subunit{suffix}", f"JUMP21fold121_subunit{suffix}",
                           f"JUMP22fold111_subunit{suffix}", f"JUMP22fold121_subunit{suffix}", f"JUMP23fold111_subunit{suffix}",
                           f"JUMP24fold111_subunit{suffix}", f"JUMP25fold111_subunit{suffix}",
                           f"JUMP26fold111_subunit{suffix}")
-
+        ss2._set_init_vrts()
+        if straighten_COM:
+            self.straightinator(ss2)
         return ss2
 
-    def create_T_3fold_based_symmetry(self, suffix=""):
+    def create_T_3fold_based_symmetry(self, suffix="", make_sds=True, straighten_COM=True):
 
         # 1: find 3 fold and create a an initial setup based on that. Use the same anchor atom
         # 2: rotate +72 and -72 and include 2 of the chains present in the 5-fold setup
@@ -1297,12 +1404,16 @@ class CubicSetup(SymmetrySetup):
         # 1 threefold
         # 2 twofolds
         # colors are as given in HF symmetry
+        if make_sds:
+            last = "sds"
+        else:
+            last = "z"
         ss3.energies = " + ".join((
-           f"12*VRT31fold111_z{suffix}", # green
-           f"12*(VRT31fold111_z{suffix}:VRT31fold121_z{suffix})", # dark blue (other 3fold)
-           f"12*(VRT31fold111_z{suffix}:VRT32fold111_z{suffix})", # light blue (3fold)
-           f"6*(VRT31fold111_z{suffix}:VRT32fold121_z{suffix})", # brown (2-fold closest)
-           f"6*(VRT31fold111_z{suffix}:VRT33fold131_z{suffix})")) # white (2-fold furthest)
+           f"12*VRT31fold111_{last}{suffix}", # green
+           f"12*(VRT31fold111_{last}{suffix}:VRT31fold121_{last}{suffix})", # dark blue (other 3fold)
+           f"12*(VRT31fold111_{last}{suffix}:VRT32fold111_{last}{suffix})", # light blue (3fold)
+           f"6*(VRT31fold111_{last}{suffix}:VRT32fold121_{last}{suffix})", # brown (2-fold closest)
+           f"6*(VRT31fold111_{last}{suffix}:VRT33fold131_{last}{suffix})")) # white (2-fold furthest)
 
         setup_applied_dofs = copy.deepcopy(self)
         setup_applied_dofs.apply_dofs()
@@ -1361,7 +1472,7 @@ class CubicSetup(SymmetrySetup):
         # ss3.add_jump(f"JUMP31fold111_x_tref{suffix}", f"VRT31fold1_z{suffix}", f"VRT31fold111_x_tref{suffix}")
         # ss3.add_jump(f"JUMP31fold11{suffix}", f"VRT31fold111_x_tref{suffix}", f"VRT31fold11{suffix}")
         # ss3.add_jump(f"JUMP31fold111{suffix}", f"VRT31fold11{suffix}", f"VRT31fold111{suffix}")
-        ss3._create_final_ref_dofs(self, ss3, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="111", suffix=suffix)
+        ss3._create_final_ref_dofs(self, ss3, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="111", suffix=suffix, make_sds=make_sds)
         # ---- chain 2 ----
         R = rotation_matrix(center3, 120)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT31fold12{suffix}").rotate_right_multiply(R, True))
@@ -1372,7 +1483,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="31", ss_t_nb2="2", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="121", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ---- chain 3 ----
         R = rotation_matrix(center3, -120)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT31fold13{suffix}").rotate_right_multiply(R, True))
@@ -1382,7 +1493,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="31", ss_t_nb2="3", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="131", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
 
         ##############################
         # Create surrounding 3 folds #
@@ -1402,7 +1513,7 @@ class CubicSetup(SymmetrySetup):
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT32fold11{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold111{suffix}", f"VRT32fold111{suffix}").rotate_right_multiply(R, True))
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="32", ss_t_nb2="111", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT32fold111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT32fold1111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_jump(f"JUMP32fold11{suffix}", f"VRT32fold1{suffix}", f"VRT32fold11{suffix}")
@@ -1413,7 +1524,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="2", ss_t_nb1="32", ss_t_nb2="2", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="121", ss_t_nb1="32", ss_t_nb2="121", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
 
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold12{suffix}", f"VRT32fold12{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold121{suffix}", f"VRT32fold121{suffix}").rotate_right_multiply(R, True))
@@ -1439,7 +1550,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="33", ss_t_nb2="1", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="33", ss_t_nb2="111", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT35fold11{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold111{suffix}", f"VRT35fold111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT35fold1111{suffix}").rotate_right_multiply(R, True))
@@ -1451,7 +1562,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="3", ss_t_nb1="33", ss_t_nb2="3", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="131", ss_t_nb1="33", ss_t_nb2="131", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold13{suffix}", f"VRT35fold13{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold131{suffix}", f"VRT35fold131{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1311{suffix}", f"VRT35fold1311{suffix}").rotate_right_multiply(R, True))
@@ -1540,13 +1651,19 @@ class CubicSetup(SymmetrySetup):
         ss3.add_jumpgroup("JUMPGROUP6", f"JUMP31fold111_z{suffix}", f"JUMP31fold121_z{suffix}", f"JUMP31fold131_z{suffix}",
                           f"JUMP32fold111_z{suffix}", f"JUMP32fold121_z{suffix}",
                           f"JUMP33fold111_z{suffix}", f"JUMP33fold131_z{suffix}")
-        ss3.add_jumpgroup("JUMPGROUP7", f"JUMP31fold111_subunit{suffix}", f"JUMP31fold121_subunit{suffix}",
+        if make_sds:
+            ss3.add_jumpgroup("JUMPGROUP7", f"JUMP31fold111_sds{suffix}", f"JUMP31fold121_sds{suffix}",
+                              f"JUMP31fold131_sds{suffix}", f"JUMP32fold111_sds{suffix}", f"JUMP32fold121_sds{suffix}",
+                              f"JUMP33fold111_sds{suffix}", f"JUMP33fold131_sds{suffix}")
+        ss3.add_jumpgroup("JUMPGROUP8", f"JUMP31fold111_subunit{suffix}", f"JUMP31fold121_subunit{suffix}",
                           f"JUMP31fold131_subunit{suffix}", f"JUMP32fold111_subunit{suffix}", f"JUMP32fold121_subunit{suffix}",
                           f"JUMP33fold111_subunit{suffix}", f"JUMP33fold131_subunit{suffix}")
-
+        ss3._set_init_vrts()
+        if straighten_COM:
+            self.straightinator(ss3)
         return ss3
 
-    def create_T_2fold_based_symmetry(self, suffix=''):
+    def create_T_2fold_based_symmetry(self, suffix='', make_sds=True, straighten_COM=True):
         """Creates a 2-fold based symmetry file from a Tetrahedral HF-based symmetry setup."""
         ss2 = CubicSetup()
         ss2.reference_symmetric = True
@@ -1559,11 +1676,15 @@ class CubicSetup(SymmetrySetup):
         # 2 fivefolds
         # 1 threefold
         # 2 twofolds
-        ss2.energies = f"12*VRT21fold111_z{suffix} + " \
-                       f"12*(VRT21fold111_z{suffix}:VRT23fold111_z{suffix}) + " \
-                       f"12*(VRT21fold111_z{suffix}:VRT22fold121_z{suffix}) + " \
-                       f"6*(VRT21fold111_z{suffix}:VRT21fold121_z{suffix}) + " \
-                       f"6*(VRT21fold111_z{suffix}:VRT24fold111_z{suffix})"
+        if make_sds:
+            last = "sds"
+        else:
+            last = "z"
+        ss2.energies = f"12*VRT21fold111_{last}{suffix} + " \
+                       f"12*(VRT21fold111_{last}{suffix}:VRT23fold111_{last}{suffix}) + " \
+                       f"12*(VRT21fold111_{last}{suffix}:VRT22fold121_{last}{suffix}) + " \
+                       f"6*(VRT21fold111_{last}{suffix}:VRT21fold121_{last}{suffix}) + " \
+                       f"6*(VRT21fold111_{last}{suffix}:VRT24fold111_{last}{suffix})"
 
         setup_applied_dofs = copy.deepcopy(self)
         setup_applied_dofs.apply_dofs()
@@ -1608,7 +1729,7 @@ class CubicSetup(SymmetrySetup):
         vrt21fold.rotate(R)
         ss2._create_base_dofs(ss2, ss2, ss_f_nb1="21", ss_t_nb1="21", base_vrt=vrt21fold)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="", ss_t_nb1="21", ss_t_nb2="1", suffix=suffix)
-        ss2._create_final_ref_dofs(self, ss2, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="111", suffix=suffix)
+        ss2._create_final_ref_dofs(self, ss2, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="111", suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(vrt21fold)
         # ss2.add_jump(f"JUMP21fold{suffix}", f"VRTglobal{suffix}", f"VRT21fold{suffix}")
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT21fold1{suffix}"))
@@ -1629,7 +1750,7 @@ class CubicSetup(SymmetrySetup):
 
         R = rotation_matrix(center2, 180)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="1", ss_t_nb1="21", ss_t_nb2="2", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="121", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="121", R=R, suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold11{suffix}", f"VRT21fold12{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold111{suffix}", f"VRT21fold121{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1111{suffix}", f"VRT21fold1211{suffix}").rotate(R, True))
@@ -1658,7 +1779,7 @@ class CubicSetup(SymmetrySetup):
         # ss2.add_jump(f"JUMP22fold1{suffix}", f"VRT22fold{suffix}", f"VRT22fold1{suffix}")
         # ---- chain 1 ----
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="1", ss_t_nb1="22", ss_t_nb2="1", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="22", ss_t_nb2="111", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="22", ss_t_nb2="111", R=R, suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold11{suffix}", f"VRT22fold11{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1111{suffix}", f"VRT22fold111{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1111{suffix}", f"VRT22fold1111{suffix}").rotate(R, True))
@@ -1667,7 +1788,7 @@ class CubicSetup(SymmetrySetup):
         # ss2.add_jump(f"JUMP22fold1111{suffix}", f"VRT22fold111{suffix}", f"VRT22fold1111{suffix}")
         # ---- chain 2 ----
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="2", ss_t_nb1="22", ss_t_nb2="2", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="121", ss_t_nb1="22", ss_t_nb2="121", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="121", ss_t_nb1="22", ss_t_nb2="121", R=R, suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold12{suffix}", f"VRT22fold12{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold121{suffix}", f"VRT22fold121{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1211{suffix}", f"VRT22fold1211{suffix}").rotate(R, True))
@@ -1687,7 +1808,7 @@ class CubicSetup(SymmetrySetup):
             vrt_base = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT2{n}fold{suffix}").rotate(R, True)
             ss2._create_base_dofs(ss2, ss2, ss_f_nb1="21", ss_t_nb1=f"2{n}", base_vrt=vrt_base, R=R)
             ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2=f"", ss_t_nb1=f"2{n}", ss_t_nb2=f"1", R=R, suffix=suffix)
-            ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2=f"111", ss_t_nb1=f"2{n}", ss_t_nb2=f"111", R=R, suffix=suffix)
+            ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2=f"111", ss_t_nb1=f"2{n}", ss_t_nb2=f"111", R=R, suffix=suffix, make_sds=make_sds)
 
             # vrt2nfold = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT2{n}fold{suffix}").rotate(R, True)
             # vrt2nfold1 = ss2.copy_vrt(f"VRT21fold1{suffix}", f"VRT2{n}fold1{suffix}").rotate(R, True)
@@ -1712,7 +1833,7 @@ class CubicSetup(SymmetrySetup):
         vrt_base = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT24fold{suffix}").rotate(R, True)
         ss2._create_base_dofs(ss2, ss2, ss_f_nb1="21", ss_t_nb1=f"24", base_vrt=vrt_base, R=R)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="", ss_t_nb1=f"24", ss_t_nb2=f"1", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1=f"24", ss_t_nb2=f"111", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1=f"24", ss_t_nb2=f"111", R=R, suffix=suffix,  make_sds=make_sds)
 
         # vrt26fold = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT26fold{suffix}").rotate(R, True)
         # vrt26fold1 = ss2.copy_vrt(f"VRT21fold1{suffix}", f"VRT26fold1{suffix}").rotate(R, True)
@@ -1738,7 +1859,7 @@ class CubicSetup(SymmetrySetup):
         vrt_base = ss2.copy_vrt(f"VRT22fold{suffix}", f"VRT25fold{suffix}").rotate(R, True)
         ss2._create_base_dofs(ss2, ss2, ss_f_nb1="22", ss_t_nb1=f"25", base_vrt=vrt_base, R=R)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="22", ss_f_nb2="", ss_t_nb1=f"25", ss_t_nb2=f"1", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="22", ss_f_nb2="111", ss_t_nb1=f"25", ss_t_nb2=f"111", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="22", ss_f_nb2="111", ss_t_nb1=f"25", ss_t_nb2=f"111", R=R, suffix=suffix,  make_sds=make_sds)
         # # ---- create base ----
         # vrt27fold = ss2.copy_vrt(f"VRT22fold{suffix}", f"VRT27fold{suffix}").rotate(R, True)
         # vrt27fold1 = ss2.copy_vrt(f"VRT22fold1{suffix}", f"VRT27fold1{suffix}").rotate(R, True)
@@ -1786,15 +1907,22 @@ class CubicSetup(SymmetrySetup):
         ss2.add_jumpgroup("JUMPGROUP6", f"JUMP21fold111_z{suffix}", f"JUMP21fold121_z{suffix}", f"JUMP22fold111_z{suffix}",
                           f"JUMP22fold121_z{suffix}", f"JUMP23fold111_z{suffix}",
                           f"JUMP24fold111_z{suffix}", f"JUMP25fold111_z{suffix}")
-        ss2.add_jumpgroup("JUMPGROUP7", f"JUMP21fold111_subunit{suffix}", f"JUMP21fold121_subunit{suffix}",
+        if make_sds:
+            ss2.add_jumpgroup("JUMPGROUP7", f"JUMP21fold111_sds{suffix}", f"JUMP21fold121_sds{suffix}",
+                              f"JUMP22fold111_sds{suffix}", f"JUMP22fold121_sds{suffix}", f"JUMP23fold111_sds{suffix}",
+                              f"JUMP24fold111_sds{suffix}",
+                              f"JUMP25fold111_sds{suffix}")
+        ss2.add_jumpgroup("JUMPGROUP8", f"JUMP21fold111_subunit{suffix}", f"JUMP21fold121_subunit{suffix}",
                           f"JUMP22fold111_subunit{suffix}", f"JUMP22fold121_subunit{suffix}", f"JUMP23fold111_subunit{suffix}",
                           f"JUMP24fold111_subunit{suffix}",
                           f"JUMP25fold111_subunit{suffix}")
-
+        ss2._set_init_vrts()
+        if straighten_COM:
+            self.straightinator(ss2)
         return ss2
 
     # ASSUMING IT IS 5FOLD - well it can only be that so because O doesnt have 3fold and T already is
-    def create_I_3fold_based_symmetry(self, suffix=''):
+    def create_I_3fold_based_symmetry(self, suffix='', make_sds=True, straighten_COM=True):
 
         # 1: find 3 fold and create a an initial setup based on that. Use the same anchor atom
         # 2: rotate +72 and -72 and include 2 of the chains present in the 5-fold setup
@@ -1810,10 +1938,14 @@ class CubicSetup(SymmetrySetup):
         # 2 fivefolds
         # 1 threefold
         # 2 twofolds
-        ss3.energies = f"60*VRT31fold111_z{suffix} + " \
-                       f"60*(VRT31fold111_z{suffix}:VRT32fold111_z{suffix}) + 60*(VRT31fold111_z{suffix}:VRT33fold111_z{suffix}) + " \
-                       f"60*(VRT31fold111_z{suffix}:VRT31fold121_z{suffix}) + " \
-                       f"30*(VRT31fold111_z{suffix}:VRT32fold121_z{suffix}) + 30*(VRT31fold111_z{suffix}:VRT35fold131_z{suffix})"
+        if make_sds:
+            last = "sds"
+        else:
+            last = "z"
+        ss3.energies = f"60*VRT31fold111_{last}{suffix} + " \
+                       f"60*(VRT31fold111_{last}{suffix}:VRT32fold111_{last}{suffix}) + 60*(VRT31fold111_{last}{suffix}:VRT33fold111_{last}{suffix}) + " \
+                       f"60*(VRT31fold111_{last}{suffix}:VRT31fold121_{last}{suffix}) + " \
+                       f"30*(VRT31fold111_{last}{suffix}:VRT32fold121_{last}{suffix}) + 30*(VRT31fold111_{last}{suffix}:VRT35fold131_{last}{suffix})"
 
         setup_applied_dofs = copy.deepcopy(self)
         setup_applied_dofs.apply_dofs()
@@ -1872,7 +2004,7 @@ class CubicSetup(SymmetrySetup):
         # ss3.add_jump(f"JUMP31fold111_x_tref{suffix}", f"VRT31fold1_z{suffix}", f"VRT31fold111_x_tref{suffix}")
         # ss3.add_jump(f"JUMP31fold11{suffix}", f"VRT31fold111_x_tref{suffix}", f"VRT31fold11{suffix}")
         # ss3.add_jump(f"JUMP31fold111{suffix}", f"VRT31fold11{suffix}", f"VRT31fold111{suffix}")
-        ss3._create_final_ref_dofs(self, ss3, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="111", suffix=suffix)
+        ss3._create_final_ref_dofs(self, ss3, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="111", suffix=suffix, make_sds=make_sds)
         # ---- chain 2 ----
         R = rotation_matrix(center3, 120)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT31fold12{suffix}").rotate_right_multiply(R, True))
@@ -1883,7 +2015,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="31", ss_t_nb2="2", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="121", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ---- chain 3 ----
         R = rotation_matrix(center3, -120)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT31fold13{suffix}").rotate_right_multiply(R, True))
@@ -1893,7 +2025,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="31", ss_t_nb2="3", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="31", ss_t_nb2="131", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
 
         ##############################
         # Create surrounding 3 folds #
@@ -1913,7 +2045,7 @@ class CubicSetup(SymmetrySetup):
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT32fold11{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold111{suffix}", f"VRT32fold111{suffix}").rotate_right_multiply(R, True))
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="32", ss_t_nb2="111", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT32fold111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT32fold1111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_jump(f"JUMP32fold11{suffix}", f"VRT32fold1{suffix}", f"VRT32fold11{suffix}")
@@ -1924,7 +2056,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="2", ss_t_nb1="32", ss_t_nb2="2", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="121", ss_t_nb1="32", ss_t_nb2="121", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
 
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold12{suffix}", f"VRT32fold12{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold121{suffix}", f"VRT32fold121{suffix}").rotate_right_multiply(R, True))
@@ -1950,7 +2082,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="35", ss_t_nb2="1", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="35", ss_t_nb2="111", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT35fold11{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold111{suffix}", f"VRT35fold111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT35fold1111{suffix}").rotate_right_multiply(R, True))
@@ -1962,7 +2094,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="3", ss_t_nb1="35", ss_t_nb2="3", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="131", ss_t_nb1="35", ss_t_nb2="131", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold13{suffix}", f"VRT35fold13{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold131{suffix}", f"VRT35fold131{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1311{suffix}", f"VRT35fold1311{suffix}").rotate_right_multiply(R, True))
@@ -1990,7 +2122,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="33", ss_t_nb2="1", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="33", ss_t_nb2="111", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT33fold11{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold111{suffix}", f"VRT33fold111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT33fold1111{suffix}").rotate_right_multiply(R, True))
@@ -2014,7 +2146,7 @@ class CubicSetup(SymmetrySetup):
         ss3._create_chain_connection(ss3, ss3, ss_f_nb1="31", ss_f_nb2="1", ss_t_nb1="34", ss_t_nb2="1", R=R, f="rotate_right_multiply",
                                      suffix=suffix)
         ss3._create_final_ref_dofs(ss3, ss3, ss_f_nb1="31", ss_f_nb2="111", ss_t_nb1="34", ss_t_nb2="111", R=R, f="rotate_right_multiply",
-                                   suffix=suffix)
+                                   suffix=suffix, make_sds=make_sds)
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold11{suffix}", f"VRT34fold11{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold111{suffix}", f"VRT34fold111{suffix}").rotate_right_multiply(R, True))
         # ss3.add_vrt(ss3.copy_vrt(f"VRT31fold1111{suffix}", f"VRT34fold1111{suffix}").rotate_right_multiply(R, True))
@@ -2052,11 +2184,18 @@ class CubicSetup(SymmetrySetup):
         ss3.add_jumpgroup("JUMPGROUP6", f"JUMP31fold111_z{suffix}", f"JUMP31fold121_z{suffix}", f"JUMP31fold131_z{suffix}",
                           f"JUMP32fold111_z{suffix}", f"JUMP32fold121_z{suffix}", f"JUMP35fold111_z{suffix}", f"JUMP35fold131_z{suffix}",
                           f"JUMP33fold111_z{suffix}", f"JUMP34fold111_z{suffix}")
-        ss3.add_jumpgroup("JUMPGROUP7", f"JUMP31fold111_subunit{suffix}", f"JUMP31fold121_subunit{suffix}",
+        if make_sds:
+            ss3.add_jumpgroup("JUMPGROUP7", f"JUMP31fold111_sds{suffix}", f"JUMP31fold121_sds{suffix}",
+                              f"JUMP31fold131_sds{suffix}", f"JUMP32fold111_sds{suffix}", f"JUMP32fold121_sds{suffix}",
+                              f"JUMP35fold111_sds{suffix}", f"JUMP35fold131_sds{suffix}", f"JUMP33fold111_sds{suffix}",
+                              f"JUMP34fold111_sds{suffix}")
+        ss3.add_jumpgroup("JUMPGROUP8", f"JUMP31fold111_subunit{suffix}", f"JUMP31fold121_subunit{suffix}",
                           f"JUMP31fold131_subunit{suffix}", f"JUMP32fold111_subunit{suffix}", f"JUMP32fold121_subunit{suffix}",
                           f"JUMP35fold111_subunit{suffix}", f"JUMP35fold131_subunit{suffix}", f"JUMP33fold111_subunit{suffix}",
                           f"JUMP34fold111_subunit{suffix}")
-
+        ss3._set_init_vrts()
+        if straighten_COM:
+            self.straightinator(ss3)
         return ss3
 
     # fixme: delete if not used
@@ -2071,26 +2210,47 @@ class CubicSetup(SymmetrySetup):
             else:
                 return string
 
-    def _right_handed_vectors(self, v1, v2, axis):
+    @staticmethod
+    def _right_handed_vectors(v1, v2, axis):
         """Returns true if the point v1 going to v2 relative to the axis is right-handed. It is left-handed if the cross product v1 X v2
         points in the same direction as the axis and right-handed if it points the opposite way with the cutoff being 180/2 degrees."""
         cross = np.cross(np.array(v1 - axis), np.array(v2 - axis))
         return vector_angle(cross, axis) > 90  # True -> It is right-handed
 
-    def calculate_if_rightanded(self):
-        """Returns true if the point fold3_axis going to fold2_axis relative to the foldHF_axis is right-handed. It is left-handed if the cross product fold3_axis X fold2_axis
-        points in the same direction as the foldF_axis and right-handed if it points the opposite way with the cutoff being 180/2 degrees."""
-        if self.is_hf_based():
-            foldHF_axis = -self.get_vrt("VRTHFfold1").vrt_z
-            fold3_axis = -self.get_vrt("VRT3fold1").vrt_z
-            fold2_axis = -self.get_vrt("VRT2fold1").vrt_z
-            return self._right_handed_vectors(fold3_axis, fold2_axis, foldHF_axis)
-        elif self.is_3f_based():
-            pass
-        elif self.is_2f_based():
-            pass
 
-    def create_I_2fold_based_symmetry(self, suffix=''):
+
+    @staticmethod
+    def _get_z_from_downstream_jump(pose, jump_name):
+        jump_id = sym_dof_jump_num(pose, jump_name)
+        vrt = pose.residue(pose.fold_tree().downstream_jump_residue(jump_id))
+        # 1 seems to be origo
+        # 2 is x
+        # 3 is y
+        o = np.array(vrt.atom(1).xyz())
+        x = np.array(vrt.atom(2).xyz()) - o
+        y = np.array(vrt.atom(3).xyz()) - o
+        z = np.cross(x, y)
+        return z
+
+    @staticmethod
+    def calculate_if_righthanded_from_pose(pose):
+        base = CubicSetup.get_base_from_pose(pose)
+        ji_1, ji_2, ji_3 = CubicSetup.get_fold_jumpidentifier_from_pose(pose)
+        jn = "JUMP{}fold1"
+        # foldHF_axis = -self.get_vrt("VRTHFfold1").vrt_z
+        # fold3_axis = -self.get_vrt("VRT3fold1").vrt_z
+        # fold2_axis = -self.get_vrt("VRT2fold1").vrt_z
+        if base == "HF":
+            ji_1_z = - CubicSetup._get_z_from_downstream_jump(pose, jn.format(ji_1))
+            ji_2_z = - CubicSetup._get_z_from_downstream_jump(pose, jn.format(ji_2))
+            ji_3_z = - CubicSetup._get_z_from_downstream_jump(pose, jn.format(ji_3))
+        elif base == "3F":
+            raise NotImplementedError
+        elif base == "2F":
+            raise NotImplementedError
+        return CubicSetup._right_handed_vectors(ji_2_z, ji_3_z, ji_1_z) # 3, 2, HF
+
+    def create_I_2fold_based_symmetry(self, suffix='', make_sds=True, straighten_COM=True):
         """Creates a 2-fold based symmetry file from a HF-based (CURRENTLY ONLY 5-fold) one."""
         ss2 = CubicSetup()
         ss2.reference_symmetric = True
@@ -2102,10 +2262,14 @@ class CubicSetup(SymmetrySetup):
         # 2 fivefolds
         # 1 threefold
         # 2 twofolds
-        ss2.energies = f"60*VRT21fold111_z{suffix} + " \
-                       f"60*(VRT21fold111_z{suffix}:VRT25fold111_z{suffix}) + 60*(VRT21fold111_z{suffix}:VRT24fold111_z{suffix}) + " \
-                       f"60*(VRT21fold111_z{suffix}:VRT22fold121_z{suffix}) + " \
-                       f"30*(VRT21fold111_z{suffix}:VRT21fold121_z{suffix}) + 30*(VRT21fold111_z{suffix}:VRT26fold111_z{suffix})"
+        if make_sds:
+            last = "sds"
+        else:
+            last = "z"
+        ss2.energies = f"60*VRT21fold111_{last}{suffix} + " \
+                       f"60*(VRT21fold111_{last}{suffix}:VRT25fold111_{last}{suffix}) + 60*(VRT21fold111_{last}{suffix}:VRT24fold111_{last}{suffix}) + " \
+                       f"60*(VRT21fold111_{suffix}:VRT22fold121_{last}{suffix}) + " \
+                       f"30*(VRT21fold111_{last}{suffix}:VRT21fold121_{last}{suffix}) + 30*(VRT21fold111_{last}{suffix}:VRT26fold111_{last}{suffix})"
 
         setup_applied_dofs = copy.deepcopy(self)
         setup_applied_dofs.apply_dofs()
@@ -2150,7 +2314,7 @@ class CubicSetup(SymmetrySetup):
         vrt21fold.rotate(R)
         ss2._create_base_dofs(ss2, ss2, ss_f_nb1="21", ss_t_nb1="21", base_vrt=vrt21fold)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="", ss_t_nb1="21", ss_t_nb2="1", suffix=suffix)
-        ss2._create_final_ref_dofs(self, ss2, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="111", suffix=suffix)
+        ss2._create_final_ref_dofs(self, ss2, ss_f_nb1="HF", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="111", suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(vrt21fold)
         # ss2.add_jump(f"JUMP21fold{suffix}", f"VRTglobal{suffix}", f"VRT21fold{suffix}")
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT21fold1{suffix}"))
@@ -2171,7 +2335,7 @@ class CubicSetup(SymmetrySetup):
 
         R = rotation_matrix(center2, 180)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="1", ss_t_nb1="21", ss_t_nb2="2", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="121", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="21", ss_t_nb2="121", R=R, suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold11{suffix}", f"VRT21fold12{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold111{suffix}", f"VRT21fold121{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1111{suffix}", f"VRT21fold1211{suffix}").rotate(R, True))
@@ -2200,7 +2364,7 @@ class CubicSetup(SymmetrySetup):
         # ss2.add_jump(f"JUMP22fold1{suffix}", f"VRT22fold{suffix}", f"VRT22fold1{suffix}")
         # ---- chain 1 ----
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="1", ss_t_nb1="22", ss_t_nb2="1", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="22", ss_t_nb2="111", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1="22", ss_t_nb2="111", R=R, suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold11{suffix}", f"VRT22fold11{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1111{suffix}", f"VRT22fold111{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1111{suffix}", f"VRT22fold1111{suffix}").rotate(R, True))
@@ -2209,7 +2373,7 @@ class CubicSetup(SymmetrySetup):
         # ss2.add_jump(f"JUMP22fold1111{suffix}", f"VRT22fold111{suffix}", f"VRT22fold1111{suffix}")
         # ---- chain 2 ----
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="2", ss_t_nb1="22", ss_t_nb2="2", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="121", ss_t_nb1="22", ss_t_nb2="121", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="121", ss_t_nb1="22", ss_t_nb2="121", R=R, suffix=suffix, make_sds=make_sds)
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold12{suffix}", f"VRT22fold12{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold121{suffix}", f"VRT22fold121{suffix}").rotate(R, True))
         # ss2.add_vrt(ss2.copy_vrt(f"VRT21fold1211{suffix}", f"VRT22fold1211{suffix}").rotate(R, True))
@@ -2229,7 +2393,7 @@ class CubicSetup(SymmetrySetup):
             vrt_base = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT2{n}fold{suffix}").rotate(R, True)
             ss2._create_base_dofs(ss2, ss2, ss_f_nb1="21", ss_t_nb1=f"2{n}", base_vrt=vrt_base, R=R)
             ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2=f"", ss_t_nb1=f"2{n}", ss_t_nb2=f"1", R=R, suffix=suffix)
-            ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2=f"111", ss_t_nb1=f"2{n}", ss_t_nb2=f"111", R=R, suffix=suffix)
+            ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2=f"111", ss_t_nb1=f"2{n}", ss_t_nb2=f"111", R=R, suffix=suffix, make_sds=make_sds)
 
             # vrt2nfold = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT2{n}fold{suffix}").rotate(R, True)
             # vrt2nfold1 = ss2.copy_vrt(f"VRT21fold1{suffix}", f"VRT2{n}fold1{suffix}").rotate(R, True)
@@ -2254,7 +2418,7 @@ class CubicSetup(SymmetrySetup):
         vrt_base = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT26fold{suffix}").rotate(R, True)
         ss2._create_base_dofs(ss2, ss2, ss_f_nb1="21", ss_t_nb1=f"26", base_vrt=vrt_base, R=R)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="21", ss_f_nb2="", ss_t_nb1=f"26", ss_t_nb2=f"1", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1=f"26", ss_t_nb2=f"111", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="21", ss_f_nb2="111", ss_t_nb1=f"26", ss_t_nb2=f"111", R=R, suffix=suffix, make_sds=make_sds)
 
         # vrt26fold = ss2.copy_vrt(f"VRT21fold{suffix}", f"VRT26fold{suffix}").rotate(R, True)
         # vrt26fold1 = ss2.copy_vrt(f"VRT21fold1{suffix}", f"VRT26fold1{suffix}").rotate(R, True)
@@ -2280,7 +2444,7 @@ class CubicSetup(SymmetrySetup):
         vrt_base = ss2.copy_vrt(f"VRT22fold{suffix}", f"VRT27fold{suffix}").rotate(R, True)
         ss2._create_base_dofs(ss2, ss2, ss_f_nb1="22", ss_t_nb1=f"27", base_vrt=vrt_base, R=R)
         ss2._create_chain_connection(ss2, ss2, ss_f_nb1="22", ss_f_nb2="", ss_t_nb1=f"27", ss_t_nb2=f"1", R=R, suffix=suffix)
-        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="22", ss_f_nb2="111", ss_t_nb1=f"27", ss_t_nb2=f"111", R=R, suffix=suffix)
+        ss2._create_final_ref_dofs(ss2, ss2, ss_f_nb1="22", ss_f_nb2="111", ss_t_nb1=f"27", ss_t_nb2=f"111", R=R, suffix=suffix, make_sds=make_sds)
         # # ---- create base ----
         # vrt27fold = ss2.copy_vrt(f"VRT22fold{suffix}", f"VRT27fold{suffix}").rotate(R, True)
         # vrt27fold1 = ss2.copy_vrt(f"VRT22fold1{suffix}", f"VRT27fold1{suffix}").rotate(R, True)
@@ -2328,9 +2492,16 @@ class CubicSetup(SymmetrySetup):
         ss2.add_jumpgroup("JUMPGROUP6", f"JUMP21fold111_z{suffix}", f"JUMP21fold121_z{suffix}", f"JUMP22fold111_z{suffix}",
                           f"JUMP22fold121_z{suffix}", f"JUMP23fold111_z{suffix}", f"JUMP24fold111_z{suffix}",
                           f"JUMP25fold111_z{suffix}", f"JUMP26fold111_z{suffix}", f"JUMP27fold111_z{suffix}")
-        ss2.add_jumpgroup("JUMPGROUP7", f"JUMP21fold111_subunit{suffix}", f"JUMP21fold121_subunit{suffix}",
+        if make_sds:
+            ss2.add_jumpgroup("JUMPGROUP7", f"JUMP21fold111_sds{suffix}", f"JUMP21fold121_sds{suffix}",
+                              f"JUMP22fold111_sds{suffix}", f"JUMP22fold121_sds{suffix}", f"JUMP23fold111_sds{suffix}",
+                              f"JUMP24fold111_sds{suffix}", f"JUMP25fold111_sds{suffix}", f"JUMP26fold111_sds{suffix}",
+                              f"JUMP27fold111_sds{suffix}")
+        ss2.add_jumpgroup("JUMPGROUP8", f"JUMP21fold111_subunit{suffix}", f"JUMP21fold121_subunit{suffix}",
                           f"JUMP22fold111_subunit{suffix}", f"JUMP22fold121_subunit{suffix}", f"JUMP23fold111_subunit{suffix}",
                           f"JUMP24fold111_subunit{suffix}", f"JUMP25fold111_subunit{suffix}", f"JUMP26fold111_subunit{suffix}",
                           f"JUMP27fold111_subunit{suffix}")
-
+        ss2._set_init_vrts()
+        if straighten_COM:
+            self.straightinator(ss2)
         return ss2

@@ -205,6 +205,7 @@ class SymdefNormalizer:
                 cs_hf_norm.get_vrt(vrt).rotate(R_their_z)
                 cs_hf_norm.get_vrt(vrt).rotate(R_global_z_z)
         cs_hf_norm.anchor = "COM"
+        cs_hf_norm._set_init_vrts() #
         # check if normalized correctly
         self.check_if_normalized(cs_hf_norm)
         # make the 3-fold and 2-fold based normalized cubicsetups
@@ -212,13 +213,43 @@ class SymdefNormalizer:
         cs_hf_norm.make_symmetric_pose(pose)
         sds = SymDefSwapper(pose, StringIO(cs_hf_norm.make_symmetry_definition()))
         cs_3_norm, cs_2_norm = sds.fold3_setup, sds.fold2_setup
-        for norm, base in zip((cs_hf_norm, cs_3_norm, cs_2_norm), ("HF", "31", "21")):
-            # apply the default translation if set
-            if final_z_trans is not None:
-                norm.set_dof(f"JUMP{base}fold1", "z", "translation", final_z_trans)
-            if final_x_trans is not None:
-                norm.set_dof(f"JUMP{base}fold111", "x", "translation", final_x_trans)
+
+        # now we want to straighten the vrts of 3 and 2
+        # self.straightinator(cs_3_norm)
+        # self.straightinator(cs_2_norm)
+
+        # for norm, base in zip((cs_hf_norm, cs_3_norm, cs_2_norm), ("HF", "31", "21")):
+        #     # apply the default translation if set
+        #     if final_z_trans is not None:
+        #         norm.set_dof(f"JUMP{base}fold1", "z", "translation", final_z_trans)
+        #     if final_x_trans is not None:
+        #         norm.set_dof(f"JUMP{base}fold111", "x", "translation", final_x_trans)
         return cs_hf_norm, cs_3_norm, cs_2_norm, hf_rot_angle
+
+    # def straightinator(self, cs):
+    #     """Makes the last VRT's that control the COM rotation are set identical to their parent VRT '=straighten'. This is
+    #     important when we flip the subunits during EvoDOCK"""
+    #     for vrts in [cs.get_downstream_connections(j)[:-2] for j in cs._jumpgroups["JUMPGROUP3"]]:
+    #         for n, vrt in enumerate(vrts):
+    #             if n == 0:
+    #                 vrt_to_copy = deepcopy(cs.get_unapplied_vrt(vrt))
+    #             else:
+    #                 vrt_to_replace = cs.get_unapplied_vrt(vrt)
+    #                 vrt_to_replace._vrt_orig = vrt_to_copy._vrt_orig
+    #                 vrt_to_replace._vrt_x = vrt_to_copy._vrt_x
+    #                 vrt_to_replace._vrt_y = vrt_to_copy._vrt_y
+    #                 vrt_to_replace._vrt_z = vrt_to_copy._vrt_z
+    #                 if "x_rref" in vrt_to_replace.name:
+    #                     vrt_to_replace._vrt_orig = self.add_along_vector(vrt_to_replace._vrt_orig, vrt_to_replace._vrt_x)
+    #                 elif "y_rref" in vrt_to_replace.name:
+    #                     vrt_to_replace._vrt_orig = self.add_along_vector(vrt_to_replace._vrt_orig, vrt_to_replace._vrt_y)
+    #                 elif "z_rref" in vrt_to_replace.name:
+    #                     vrt_to_replace._vrt_orig = self.add_along_vector(vrt_to_replace._vrt_orig, vrt_to_replace._vrt_z)
+    #                 cs._init_vrts[cs._init_vrts.index(vrt_to_replace)] = vrt_to_replace
+
+
+    def add_along_vector(self, origo, vector, mul=1, dir=-1):
+        return origo + (dir * vector / np.linalg.norm(vector)) * mul
 
     def check_if_normalized(self, cs_hf_norm):
         cs = deepcopy(cs_hf_norm)
