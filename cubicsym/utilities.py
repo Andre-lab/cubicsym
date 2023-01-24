@@ -10,8 +10,7 @@ from Bio.PDB.PDBParser import PDBParser
 import numpy as np
 from itertools import combinations
 from symmetryhandler.reference_kinematics import get_dofs
-
-
+from pyrosetta.rosetta.core.pose.symmetry import is_symmetric
 
 def cut_all_but_chains(pose, *chains):
     """Cuts all chain in the pose except for the chains given."""
@@ -143,6 +142,33 @@ def pose_cas_are_identical(*poses, atol=1e-3, map_chains:list=None):
         xyzs = [get_all_ca_atoms_slow(p) for p in poses]
         return all([np.allclose(xyzs[i], xyzs[j], atol=atol) for i, j in list(combinations(range(len(poses)), 2))])
 
+def get_base_from_pose(pose):
+    """Returns the cubicsetup type as a str from a pose."""
+    assert is_symmetric(pose)
+    # get the first jump
+    si = pose.conformation().Symmetry_Info()
+    jump = [si.get_jump_name(k) for n, (k, _) in enumerate(si.get_dofs().items()) if n == 0][0]
+    fold = jump.split("JUMP")[-1].split("fold")[0]
+    if "HF" == fold:
+        return "HF"
+    elif "31" == fold:
+        return "3F"
+    elif "21" == fold:
+        return "2F"
+    else:
+        raise ValueError("pose does not have cubic symmetry")
+
+def reduce_chain_map_to_indices(chain_map, *poses):
+    bases = [get_base_from_pose(pose) for pose in poses]
+    indices = []
+    if "HF" in bases:
+        indices.append(0)
+    elif "3F" in bases:
+        indices.append(1)
+    elif "2F" in bases:
+        indices.append(2)
+    return [tuple([c for n, c in enumerate(cm) if n in indices]) for cm in chain_map]
+
 def get_chain_map(symmetry_type, is_righthanded):
     """Returns a list of the mapping between each chain (in Rosetta numbering) between a HF-, 3- and 2-fold based setup.
     The first index is the HF-fold, the second 3-fold and third the 2-fold"""
@@ -161,6 +187,11 @@ def get_chain_map(symmetry_type, is_righthanded):
             return [(1, 1, 1), (2, 4, 5), (3, 6, 3), (4, 2, 4), (5, 7, 6), (6, 5, 2), (7, 3, 7)] # 1H0S
         else:
             return [(1, 1, 1), (2, 4, 3), (3, 6, 5), (4, 3, 4), (5, 5, 6), (6, 7, 2), (7, 2, 7)] # 1MOG
+
+def get_chain_map_as_dict(symmetry_type, is_righthanded):
+    """Returns a chain map that maps HF to the other folds."""
+    chain_map = get_chain_map(symmetry_type, is_righthanded)
+    return {hf:{"3F": f3, "2F": f2} for hf, f3, f2 in chain_map}
 
 # def map_hf_right_to_left(symmetry_type):
 #     if symmetry_type == "I":
@@ -191,9 +222,9 @@ def map_3f_right_to_left_hf(symmetry_type):
 
 def map_2f_right_to_left_hf(symmetry_type):
     if symmetry_type == "I":
-        raise NotImplementedError("NO CHAIN MAP EXIST FOR THIS YET SORRY!")
+        raise NotImplementedError("NO CHAIN MAP EXIST. It seems like chains are missing in some cases stemming from using a subassembly")
     elif symmetry_type == "O":
-        raise NotImplementedError("NO CHAIN MAP EXIST FOR THIS YET SORRY!")
+        raise NotImplementedError("NO CHAIN MAP EXIST. It seems like chains are missing in some cases stemming from using a subassembly")
     else:
         return [1, 4, 7, 3, 6, 2, 5]
 
