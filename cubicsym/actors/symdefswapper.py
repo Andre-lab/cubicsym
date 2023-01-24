@@ -140,18 +140,21 @@ class SymDefSwapper:
         assert np.isclose(np.array(poseA.residue(1).atom("CA").xyz()), np.array(poseB.residue(1).atom("CA").xyz()), atol=1e-3).all()
 
     def create_hffold_pose(self, pose, check_anchor_is_zero=False):
+        """Creates a HF-based symmetric pose from input pose"""
         poseHF = CubicSetup.make_asymmetric_pose(pose, check_anchor_is_zero=check_anchor_is_zero)
         self.foldHF_setup.make_symmetric_pose(poseHF)
         self.transfer_poseA2B(pose, poseHF)
         return poseHF
 
     def create_3fold_pose(self, pose, check_anchor_is_zero=False):
+        """Creates a 3F-based symmetric pose from input pose"""
         pose3 = CubicSetup.make_asymmetric_pose(pose, check_anchor_is_zero=check_anchor_is_zero)
         self.fold3F_setup.make_symmetric_pose(pose3)
         self.transfer_poseA2B(pose, pose3)
         return pose3
 
     def create_2fold_pose(self, pose, check_anchor_is_zero=False):
+        """Creates a 2F-based symmetric pose from input pose"""
         pose2 = CubicSetup.make_asymmetric_pose(pose, check_anchor_is_zero=check_anchor_is_zero)
         self.fold2F_setup.make_symmetric_pose(pose2)
         self.transfer_poseA2B(pose, pose2)
