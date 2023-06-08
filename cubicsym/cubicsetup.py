@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-CubicSetup class
+CubicSetut class
 @Author: Mads Jeppesen
 @Date: 9/21/22
 """
@@ -13,24 +13,80 @@ import math
 from symmetryhandler.mathfunctions import rotation_matrix, vector_angle, vector_projection_on_subspace
 import textwrap
 from cubicsym.utilities import cut_all_but_chains
-from pyrosetta.rosetta.core.scoring import CA_rmsd
+from pyrosetta.rosetta.core.scoring import CA_rmsd, rms_at_all_corresponding_atoms, superimpose_pose, rms_at_corresponding_atoms_no_super, calpha_superimpose_pose
 from pyrosetta.rosetta.std import map_unsigned_long_unsigned_long # core::Size, core::Size
 from cubicsym.utilities import get_chain_map as util_get_chain_map
-from cubicsym.utilities import map_hf_right_to_left_hf, map_3f_right_to_left_hf, map_2f_right_to_left_hf
+from cubicsym.utilities import map_hf_right_to_left_hf, map_3f_right_to_left_hf, map_2f_right_to_left_hf, get_base_from_pose
 import yaml
 from pyrosetta import pose_from_file
-from pyrosetta.rosetta.core.scoring import calpha_superimpose_pose
 from pathlib import Path
 from cubicsym.paths import DATA
 from pyrosetta.rosetta.core.pose.symmetry import is_symmetric
 from pyrosetta.rosetta.core.pose.symmetry import sym_dof_jump_num, jump_num_sym_dof
+from cubicsym.alignment import sequence_alignment_on_chain_set
+from pyrosetta.rosetta.protocols.scoring import Interface
+from pyrosetta.rosetta.std import map_core_id_AtomID_core_id_AtomID
+from pyrosetta import AtomID
+from symmetryhandler.reference_kinematics import perturb_jumpdof_str_str
+
 
 class CubicSetup(SymmetrySetup):
 
-    def __init__(self, file=None, pose=None, symmetry_name=None):
-        super().__init__(file, pose, symmetry_name)
+    def __init__(self, symdef=None, pose=None, symmetry_name=None):
+        super().__init__(symdef, pose, symmetry_name)
         self.chain_map_str2int = {k: v for k, v in zip(tuple("ABCDEFGHI"), tuple(range(1, 10)))}
         self.extract_headers()
+
+    def read_from_pose(self, pose):
+        raise NotImplementedError
+        si = pose.conformation().Symmetry_Info()
+        self.symmetry_name = f"Constructed_from_pose_{pose.pdb_info().name()}"
+        # The following is for COM. You can check that which residue is at the anchor VRT and if it is the COM residue we
+        # say that it is that residue else we pick another residue.
+        self.anchor = residue_center_of_mass(pose.conformation(), 1, pose.chain_end(1))
+        self.recenter = None  # cannot get
+        self.energies = []
+        # I am not sure i can the rest from pose.conformation().Symmetry_Info() alone
+        # these are the jumpgroups
+        # for i in range(500):
+        #     jump_clones = si.jump_clones(i)
+        #     if len(jump_clones) > 0:
+        #         print(jump_clones)
+        #         print(jump_num_sym_dof(pose, i))
+
+        # there should also be to go through pose.fold_tree()
+        # todo tmr: Finish this and test that it recapitulates the symmetry with randomized dofs
+        self._jumps = {}
+        self._jumpgroups = {}
+        self._dofs = {}
+        self._vrts = []
+        self._init_vrts = None
+        self.reference_symmetric = None
+        self.actual_anchor_residue = None
+        self.headers = {}
+                # self.headers[k] = v
+                # self.symmetry_name = " ".join(line[1:])
+                # self.energies = " ".join(line[2:])
+                # self.anchor = " ".join(line[1:])
+                # self.recenter = True
+                # self._vrts
+                # self.add_jump(line[1], line[2], line[3])
+                # self.add_dof(line[1], axes, degree, value)
+                # self.add_jumpgroup(line[1], *line[2:])
+
+        pass
+        ...
+
+    def sds_overlaps_with_anchor(self, pose, update_and_apply_dofs=True, atol=1e-1):
+        if update_and_apply_dofs:
+            self.update_dofs_from_pose(pose, apply_dofs=True)
+        anchor_pos = np.array(pose.residue(self.get_anchor_residue(pose)).atom("CA").xyz())
+        jid = self.get_jumpidentifier_from_pose(pose)
+        sds_pos = np.array(pose.residue(self.get_map_vrt_to_pose_resi(pose)[f"VRT{jid}fold111_sds"]).atom(1).xyz())
+        try:
+            assert np.isclose(anchor_pos, sds_pos, atol).all()
+        except AssertionError:
+            raise AssertionError(f"The anchor residue coordinates is {anchor_pos}, but should be be overlayed with VRT{jid}fold111_sds at {sds_pos}")
 
     @staticmethod
     def get_norm_symdef_path(symmetry, fold):
@@ -46,16 +102,14 @@ class CubicSetup(SymmetrySetup):
         self.headers.get("normalized", None)
 
     def is_normalized(self):
-        return eval(self.headers.get("normalized", False))
+        """Checks if the symmetry setup is normalized"""
+        return bool(eval(self.headers.get("normalized", "False")))
 
     def read_from_file(self, filename, check_for_reference_symmetry=True):
         super().read_from_file(filename, check_for_reference_symmetry)
         self.extract_headers()
 
-    def construct_chain_match(self, pose, pose_ref, same_handedness=True):
-        # todo: map both T and O with right handed and left handed - use the tests in cubicsetup todo this!
-        # need a way to tell if an asymmetric pose is left/right-handed. It should be possible from the chains are oriented in space.
-        # are the vrts always in the same positions in space.
+    def construct_chain_match_to_hf(self, same_handedness=True):
         assert isinstance(self.righthanded, bool), "#righthanded=True/False must be given in the symmetry file."
         symmetry = self.cubic_symmetry()
 
@@ -83,14 +137,97 @@ class CubicSetup(SymmetrySetup):
         #     pose_mapping = list(np.array(pose_mapping)[np.array(pose_new_mapping) - 1])
         # return pose_mapping
 
-    def construct_resis_any2hf(self, pose, pose_ref, same_handedness=True):
-        pose_mapping = self.construct_chain_match(pose, pose_ref, same_handedness=same_handedness)
-        resis = [i for ii in [range(pose.chain_begin(c), pose.chain_end(c) + 1) for c in pose_mapping] for i in ii]
-        resis_ref = list(range(1, pose_ref.size() + 1))
-        return resis, resis_ref
+    def interface_residues(self, pose, main_chain=1):
+        """Calculates which residues are in the interface of the main_chain. This is done by detecting all CA atoms
+        of all other chains that are within 10Å to any CA atom of the main chain."""
+        main_resis = list(range(pose.chain_begin(main_chain), pose.chain_end(main_chain) + 1))
+        other_resis = [ri for ri in range(1, pose.size()) if ri < pose.chain_begin(main_chain) or ri > pose.chain_end(main_chain)]
+        main_resis_interface, other_resis_interface = set(), set()
+        for main_resi in main_resis:
+            main_ca_xyz = pose.residue(main_resi).atom("CA").xyz()
+            for other_resi in other_resis:
+                other_ca_xyz = pose.residue(other_resi).atom("CA").xyz()
+                if main_ca_xyz.distance(other_ca_xyz) <= 10:
+                    main_resis_interface.add(main_resi)
+                    other_resis_interface.add(other_resi)
+        return main_resis_interface.union(other_resis_interface)
 
-    def construct_chain_map_any2hf(self, pose, pose_ref, same_handedness=True):
-        resis, resis_ref = self.construct_resis_any2hf(pose, pose_ref, same_handedness)
+    def construct_atom_map_any2hf(self, pose, pose_ref, same_handedness=True, interface=False, predicate="ca", use_map=None) -> map_core_id_AtomID_core_id_AtomID:
+        """Constructs a map that maps the atoms of a pose with any fold type (HF, 3F, 2F) and any handedness,
+        to a HF-based pose_ref with any handedness. The predicate determines which atoms are selected. ca: all CA atoms
+        are selected. heavey_atoms: all heavy atoms are selected."""
+        assert predicate in ("ca", "heavy_atoms")
+        resi_map = self.construct_residue_map_any2hf(pose, pose_ref, same_handedness=same_handedness, interface=interface, use_map=use_map)
+        atommap = map_core_id_AtomID_core_id_AtomID()
+        for ri_pose, ri_pose_ref in resi_map.items():
+            if predicate == "heavy_atoms":
+                for ai in range(1, pose.residue(ri_pose).natoms() + 1):
+                    assert pose.residue(ri_pose).atom_type(ai).name() == pose_ref.residue(ri_pose_ref).atom_type(ai).name()
+                    if pose.residue(ri_pose).atom_type(ai).is_heavyatom():
+                        atommap[AtomID(ai, ri_pose)] = AtomID(ai, ri_pose_ref)
+            elif predicate == "ca":
+                atommap[AtomID(2, ri_pose)] = AtomID(2, ri_pose_ref)
+        return atommap
+
+    def construct_residue_map_any2hf(self, pose, pose_ref, same_handedness=True, interface=False, use_map=None) -> map_unsigned_long_unsigned_long:
+        """Constructs a map that maps the residues of a pose with any fold type (HF, 3F, 2F) and any handedness,
+        to a HF-based pose_ref with any handedness"""
+        # 1. map  chains to eachother
+        if use_map is not None:
+            pose_mapping = use_map
+            assert len(use_map) in (7, 8, 9) #must have enough chains
+        else:
+            pose_mapping = self.construct_chain_match_to_hf(same_handedness=same_handedness)
+        # 2. map residues to eachtother taking into account the sequence alignment
+        if is_symmetric(pose_ref):
+            ref_mapping = [c for c in range(1, pose_ref.num_chains())] # this will not take the VRT residues with it
+        else:
+            ref_mapping = [c for c in range(1, pose_ref.num_chains() + 1)]
+        if use_map is not None:
+            ref_mapping = [c_ref for c_ref, c in zip(ref_mapping, pose_mapping) if c is not None]
+            pose_mapping = [c for c in pose_mapping if c is not None]
+        alignment = sequence_alignment_on_chain_set(pose, pose_ref, pose_mapping, ref_mapping) # not +1 because we dont want VRT
+        resis = [i for ii in [alignment[k] for k in [f"1_{m}" for m in pose_mapping]] for i in ii]
+        resis_ref = [i for ii in [alignment[k] for k in [f"2_{m}" for m in ref_mapping]] for i in ii]
+        if interface:
+            assert not is_symmetric(pose_ref)
+            interface_resi = self.interface_residues(pose_ref)
+            # reduce
+            resis_new, resis_ref_new = [], []
+            for resi, resi_ref in zip(resis, resis_ref):
+                if resi_ref in interface_resi:
+                    resis_new.append(resi)
+                    resis_ref_new.append(resi_ref)
+            resis, resis_ref = resis_new, resis_ref_new
+
+            # # For now we just do asymmetric only. It will most likely NOT work for symmetry but haven't tried.
+            # # In Interface::calculate() it will call symmetric_protein_calculate if the protein is symmetric, so
+            # # perhaps it will work?
+            # assert not is_symmetric(pose_ref)
+            # # We want to do the interface calculation as in protocols::docking::calc_Irmsd to stay consistent with
+            # # previous approaches to calculating this.
+            # # when looking at the Interface::protein_calculate() function it seems like the pose needs to be scored first
+            # # in order to get the Interface class to work as it uses pose.energies().energy_graph(). previously I couldn't
+            # # get 4DCL to work before I did this
+            # from pyrosetta.rosetta.core.scoring import ScoreFunctionFactory
+            # ScoreFunctionFactory.create_score_function("ref2015").score(pose_ref)
+            # resis_new, resis_ref_new = [], []
+            # # the interface has to be calculated across all jumps
+            # for jump in range(1, pose_ref.num_jump() + 1):
+            #     interface = Interface(jump)
+            #     interface.distance(10.0)  # 10.0 as in Rosetta Code
+            #     interface.calculate(pose_ref)
+            #     for resi, resi_ref in zip(resis, resis_ref):
+            #         if interface.is_interface(resi_ref):
+            #             resis_new.append(resi)
+            #             resis_ref_new.append(resi_ref)
+            #     break
+            # resis, resis_ref = resis_new, resis_ref_new
+            # assert len(resis) > 0, "No interface residues are found!"
+            # find interface in pose_re
+        # old way without sequence alignment
+        # resis = [i for ii in [range(pose.chain_begin(c), pose.chain_end(c) + 1) for c in pose_mapping] for i in ii]
+        # resis_ref = list(range(1, pose_ref.size() + 1))
         m = map_unsigned_long_unsigned_long()
         for resi, resi_ref in zip(resis, resis_ref):
             m[resi] = resi_ref
@@ -117,7 +254,7 @@ class CubicSetup(SymmetrySetup):
         """Aligns a cubic symmetrical pose onto another pose_ref taking the correct chain mapping into account. It removes the symetry
         and creates a new asymmetrical pose with reordered chains so that it matches the ordering in pose_ref. It returns the aligned pose."""
         # lets reconstruct the chains
-        pose_chains = self.construct_chain_match(pose, pose_ref, same_handedness=same_handedness)
+        pose_chains = self.construct_chain_match_to_hf(same_handedness=same_handedness)
         pose.dump_pdb("/tmp/pose_from.pdb")
         pose_ref.dump_pdb("/tmp/pose_to.pdb")
         pose_from = pose_from_file("/tmp/pose_from.pdb")
@@ -130,16 +267,75 @@ class CubicSetup(SymmetrySetup):
         calpha_superimpose_pose(pose_from_new, pose_to)
         return pose_from_new
 
-    def CA_rmsd_hf_map(self, pose, pose_ref, same_handedness=True):
-        """Calculates the CA RMSD bewteen pose and pose_ref where the change in chain numbering is taking into account between the
-        HF-, 3- and 2-fold based CubicSetup. The pose CubicSetup must be the same as self and can be either 2-,3- or HF-fold.
-        The CubicSetup of pose_ref must be HF based. The pose_ref can either be the same handedness (left/right) as the pose (which is the
-        default) or it can be opposite. If it is opposite, parse same_handedness=False"""
-        return CA_rmsd(pose, pose_ref, self.construct_chain_map_any2hf(pose, pose_ref, same_handedness=same_handedness))
+    def get_register_shift_angle(self):
+        sym = self.cubic_symmetry()
+        base = self.get_base()
+        if base == "HF":
+            if sym == "I":
+                return 72, 5
+            elif sym == "O":
+                return 90, 4
+            elif sym == "T":
+                return 120, 3
+        elif base == "3F":
+            return 120, 3
+        elif base == "2F":
+            return 180, 2
 
-    # def CA_rmsd_for_different_handedness(self, pose, pose_ref):
-    #     """Calculates the CA RMSD bewteen pose and pose_ref where the difference in handedness (left/right) is taken into account."""
-    #     return CA_rmsd(pose, pose_ref, self.construct_chain_map_any2hf(pose, pose_ref))
+    def rmsd_hf_map(self, pose, pose_ref, same_handedness=True, interface=False, predicate="ca", register_shift=True, use_map=None):
+        """Calculates the CA RMSD bewteen pose and pose_ref where the change in chain numbering is taking into account between the
+        HF-, 3- and 2-fold based CubicSetup. The pose CubicSetup must be the one belonging to pose and can be either 2-, 3- or HF-fold.
+        The CubicSetup of pose_ref must be HF based. The pose_ref can either be the same handedness (left/right) as the pose (which is the
+        default) or it can be opposite. If it is opposite, parse same_handedness=False.
+
+        :param pose: pose to calculate RMSD with
+        :param pose_ref: pose to calculate RMSD against
+        :param same_handedness: Do both pose and pose_ref have the same handedness? Are they both righthanded or both lefthanded?
+        :param interface: Use only interface atoms for the RMSD calculation.
+        :param predicate: Which atom types to use for the RMSD calculation. Now only 'ca' (CA atoms) or 'heavy_atoms' (heavy atoms)
+            are supported.
+        :param register_shift: Calculate the RMSD at all equivalent symmetrial positions by rotating around the base fold.
+        """
+        assert predicate in ("ca", "heavy_atoms")
+        atom_map = self.construct_atom_map_any2hf(pose, pose_ref, same_handedness=same_handedness, interface=interface, predicate=predicate, use_map=use_map)
+        return self.rmsd_hf_map_with_atom_map(pose, pose_ref, atom_map, register_shift)
+
+    def rmsd_hf_map_with_atom_map(self, pose, pose_ref, atom_map, register_shift=True):
+        """Same as CA_rmsd_hf_map but uses a precalculated atom_map (constructed with the construct_atom_map_any2hf
+        function) for faster RMSD calculation. See rmsd_hf_map for more information on the options."""
+        # if align_map is not None:
+            # 1. Align based on the align_map
+            # this function is not deterministic and gives crap sometimes! In the description of the function
+            # it even says you shouldt superimpose asym with sym pose. I can't find a function in Rosetta
+            # that can align a symmetric pose onto a non symmetric pose and therefore I will not do this.
+            # superimpose_pose(pose, pose_ref, align_map)
+            # 2. Calculate rmsd with no super
+            # return rms_at_corresponding_atoms_no_super(pose, pose_ref, rmsd_map)
+        # else:
+            # Superimpose and calculate rmsd in one go. The atoms that are used for the RMSD calculation are also used
+            # for the alignment.
+        if register_shift:
+            pose_temp = pose.clone()
+            angle, rots = self.get_register_shift_angle()
+            jump = f"JUMP{self.get_jumpidentifier()}fold1_z"
+            rmsds = []
+            rmsds.append(rms_at_all_corresponding_atoms(pose_temp, pose_ref, atom_map))
+            for n in range(1, rots):
+                perturb_jumpdof_str_str(pose_temp, jump, "angle_z", angle)
+                rmsds.append(rms_at_all_corresponding_atoms(pose_temp, pose_ref, atom_map))
+            return min(rmsds)
+        else:
+            return rms_at_all_corresponding_atoms(pose, pose_ref, atom_map)
+
+    @staticmethod
+    def get_jumpidentifier_from_base(base) -> str:
+        """Returns the identifier for the jump names. The movable jump names are given as JUMP<IDENTIFIER>fold<VRTTYPE>."""
+        if base == "HF":
+            return "HF"
+        elif base == "3F":
+            return "31"
+        elif base == "2F":
+            return "21"
 
     def get_jumpidentifier(self) -> str:
         """Returns the identifier for the jump names. The movable jump names are given as JUMP<IDENTIFIER>fold<VRTTYPE>."""
@@ -177,19 +373,7 @@ class CubicSetup(SymmetrySetup):
     @staticmethod
     def get_base_from_pose(pose):
         """Returns the cubicsetup type as a str from a pose."""
-        assert is_symmetric(pose)
-        # get the first jump
-        si = pose.conformation().Symmetry_Info()
-        jump = [si.get_jump_name(k) for n, (k, _) in enumerate(si.get_dofs().items()) if n == 0][0]
-        fold = jump.split("JUMP")[-1].split("fold")[0]
-        if "HF" == fold:
-            return "HF"
-        elif "31" == fold:
-            return "3F"
-        elif "21" == fold:
-            return "2F"
-        else:
-            raise ValueError("pose does not have cubic symmetry")
+        return get_base_from_pose(pose)
 
     def get_base(self) -> str:
         """Returns the cubicsetup type as a str"""

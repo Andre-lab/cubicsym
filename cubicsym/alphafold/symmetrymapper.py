@@ -183,6 +183,8 @@ class SymmetryMapper:
         combo_info = self.find_combos(pose_asym, cn, main_chains_allowed=chains_allowed, check_for_point_symmetry=False) # fixme: set to True, now it is for speedup
 
         # check for succes
+        # FIXME
+        exit("YOU NEED TO FIX the return statement here. The below thing will produce an error.")
         if not combo_info.get("success"):
             print(f"{pose_asym.pdb_info().name()} is not {cn}-fold symmetric and will not be used.")
         else:

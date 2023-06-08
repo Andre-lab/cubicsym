@@ -240,7 +240,7 @@ def test_cubic_to_rosetta_O(mock_args):
 
 @mock.patch('argparse.ArgumentParser.parse_args',
             return_value=argparse.Namespace(
-                structures=[str(T.joinpath("3LEO.cif"))],
+                structures=[str(T.joinpath("1H0S.cif"))],
                 symmetry="T",
                 overwrite=True,
                 rosetta_repr=True,
@@ -265,7 +265,14 @@ def test_cubic_to_rosetta_O(mock_args):
                 idealize=True,
                 report_names=['<prefix>.csv'],
                 ignore_chains=None,
-                main_id="1"
+                main_id="1",
+                hf1=None,
+                hf2=None,
+                hf3=None,
+                f3=None,
+                f21=None,
+                f22=None,
+                output_generated_structure=False,
             ))
 def test_cubic_to_rosetta_T(mock_args):
     from scripts.cubic_to_rosetta import main

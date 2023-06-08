@@ -13,6 +13,40 @@ from pyrosetta.rosetta.protocols.minimization_packing import MinMover
 from pyrosetta.rosetta.core.kinematics import MoveMap
 from pyrosetta.rosetta.core.pose.symmetry import sym_dof_jump_num, is_symmetric, jump_num_sym_dof
 
+def test_angle_constraint_zero_error():
+    from simpletestlib.test import setup_test
+    from cubicsym.actors.symdefswapper import SymDefSwapper
+    from cubicsym.cubicsetup import CubicSetup
+    from symmetryhandler.reference_kinematics import set_jumpdof_str_int
+    from cubicsym.actors.cubicboundary import CubicBoundary
+    from cubicsym.actors.boundedminmover import BoundedMinMover
+    from pyrosetta.rosetta.core.scoring import ScoreFunctionFactory
+    from cubicsym.dofspec import DofSpec
+
+    pose, pmm, cmd, symdef = setup_test(name="T", file="2CC9", return_symmetry_file=True, mute=True, symmetrize=True)
+
+
+    dofspec = DofSpec(pose)
+    dofspec.set_symmetrical_bounds(["1000", "60", "5", "40", "40", "40"])
+    cb = CubicBoundary(symdef, pose, dof_spec=dofspec)
+    scorefxn = ScoreFunctionFactory.create_score_function("ref2015")
+    minmover = BoundedMinMover(cb, scorefxn)._construct_minmover()
+    cb.set_constraints(pose)
+    cb.turn_on_constraint_for_score(scorefxn)
+    #fixme: both are the problem
+    set_jumpdof_str_int(pose, "JUMPHFfold1", 3, 0)
+    # set_jumpdof_str_int(pose, "JUMPHFfold111", 1, 0)
+    cb.cubicsetup.update_dofs_from_pose(pose)
+    cb.cubicsetup.visualize(ip="10.8.0.18")
+    minmover.apply(pose)
+    ...
+    # set_jumpdof_str_int(pose, "JUMPHFfold1_z", 6, b)
+    # set_jumpdof_str_int(pose, "JUMPHFfold111", 1, c)
+    # set_jumpdof_str_int(pose, "JUMPHFfold111_x", 4, d)
+    # set_jumpdof_str_int(pose, "JUMPHFfold111_y", 5, e)
+    # set_jumpdof_str_int(pose, "JUMPHFfold111_z", 6, f)
+
+
 
 def change_dofs(pose):
     a = random.uniform(-50, 50)
@@ -71,7 +105,7 @@ def test_cubic_boundary_mover():
         "JUMPHFfold111_y": {"angle_y": {"limit_movement": True, "min": lb_dof, "max": ub_dof}},
         "JUMPHFfold111_z": {"angle_z": {"limit_movement": True, "min": lb_dof, "max": ub_dof}},
     }
-    cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dofspecification=dofspecification)
+    cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dof_spec=dofspecification)
     sfxn = ScoreFunctionFactory.create_score_function("ref2015")
     cb.set_constraints(pose)
     cb.turn_on_constraint_for_score(sfxn)
@@ -111,7 +145,7 @@ def test_minization_time_with_different_sd_values():
                 times[sd] = []
             while True:
                 try:
-                    cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dofspecification=dofspecification, sd=sd)
+                    cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dof_spec=dofspecification, sd=sd)
                     if sd != "NO":
                         cb.set_constraints(pose_t)
                         cb.turn_on_constraint_for_score(sfxn)
@@ -165,7 +199,7 @@ def test_constrains():
     "JUMPHFfold111_z": {"angle_z": {"limit_movement": True, "min": lb_dof, "max": ub_dof}},
     }
     sfxn = ScoreFunctionFactory.create_score_function("empty")
-    cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dofspecification=dofspecification)
+    cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dof_spec=dofspecification)
     cb.turn_on_constraint_for_score(sfxn)
 
     # TEST 1: try a bunch of different dof variations and check that the dofs are correct
@@ -267,7 +301,7 @@ def test_construct_rigidbody_mover():
             "JUMPHFfold111_y": {"angle_y": {"limit_movement": True, "min": -5, "max": 5}},
             "JUMPHFfold111_z": {"angle_z": {"limit_movement": True, "min": -5, "max": 5}},
         }
-        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dofspecification=dofspecification)
+        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dof_spec=dofspecification)
         _ = cb.construct_rigidbody_mover(pose)
         perturb_jumpdof(pose, "JUMPHFfold1", 3, 6)
         perturb_jumpdof(pose, "JUMPHFfold1_z", 6, 7)
@@ -308,7 +342,7 @@ def test_construct_rigidbody_mover():
                 "angle_z": {"limit_movement": True, "min": -5, "max": 5}
             }
         }
-        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dofspecification=dofspecification)
+        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dof_spec=dofspecification)
         mover = cb.construct_rigidbody_mover(pose)
         for i in range(500):
             mover.apply(pose)
@@ -331,7 +365,7 @@ def test_construct_rigidbody_mover():
             }
         }
         pose = pose_org.clone()
-        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dofspecification=dofspecification)
+        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dof_spec=dofspecification)
         mover = cb.construct_rigidbody_mover(pose)
         for i in range(500):
             mover.apply(pose)
@@ -355,7 +389,7 @@ def test_construct_rigidbody_mover():
             }
         }
         pose = pose_org.clone()
-        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dofspecification=dofspecification)
+        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dof_spec=dofspecification)
         try:
             pose = pose_org.clone()
             perturb_jumpdof(pose, "JUMPHFfold1", 3, -6)
@@ -405,7 +439,7 @@ def test_construct_rigidbody_mover():
                 "angle_z": {"limit_movement": True, "min": -5, "max": 5}
             }
         }
-        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dofspecification=dofspecification)
+        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dof_spec=dofspecification)
         cb.construct_rigidbody_mover(pose)
         assert math.isclose(cb.current_limits["JUMPHFfold1"]["z"]["min"], dof_set[0])
         assert math.isclose(cb.current_limits["JUMPHFfold1"]["z"]["max"], 500)
@@ -430,7 +464,7 @@ def test_construct_rigidbody_mover():
                 "angle_z": {"limit_movement": True, "min": -5, "max": 5}
             }
         }
-        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dofspecification=dofspecification)
+        cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dof_spec=dofspecification)
         cb.construct_rigidbody_mover(pose)
         #pmm.apply(pose)
         #pmm.keep_history(True)

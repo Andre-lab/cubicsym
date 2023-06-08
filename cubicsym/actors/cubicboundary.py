@@ -16,12 +16,13 @@ from pyrosetta.rosetta.numeric import dihedral_radians
 from pyrosetta.rosetta.core.scoring import ScoreTypeManager
 from symmetryhandler.mathfunctions import vector_angle
 from symmetryhandler.reference_kinematics import set_jumpdof_str_str, get_jumpdof_str_str
-from cubicsym.kinematics import default_dofs
+from cubicsym.kinematics import default_HF_dofs
 from cubicsym.cubicsetup import CubicSetup
-from cubicsym.cubicdofs import CubicDofs
+from cubicsym.dofspec import DofSpec
 import numpy as np
 import random
 import warnings
+from cubicsym.actors.symdefswapper import SymDefSwapper
 
 class CubicBoundary:
     """Constructs a symmetrical rigid body mover that respects cubic boundaries as well as attaching constraints that respects them
@@ -33,7 +34,7 @@ class CubicBoundary:
     default_params = {"step_type": "gauss", "param1": 0.5, "param2": 0.0, "min_pertubation": 0.01,
                "limit_movement": False, "max": 0, "min": 0}
 
-    def __init__(self, symdef, pose_at_initial_position, dofspecification: dict=None, buffer=0.01, sd=1, well_depth=1e9):
+    def __init__(self, symdef, pose_at_initial_position, dof_spec: DofSpec, buffer=0.01, sd=1, well_depth=1e9):
         """
 
         :param buffer: Used when checking if the pose is inside the bounds or when perturbing the pose back into bounds if it is outisde.
@@ -41,20 +42,30 @@ class CubicBoundary:
             put at the closest boundary border +/- buffer.
         """
         self.symdef = symdef
-        self.symmetrysetup = CubicSetup(symdef)
-        self.symmetry_multiplier = self.symmetrysetup.cubic_energy_multiplier_from_pose(pose_at_initial_position)
+        self.cubicsetup = CubicSetup(symdef)
+        self.vrt_map = self.cubicsetup.get_map_vrt_to_pose_resi(pose_at_initial_position)
+        self.resi_map = {v: k for k, v in self.vrt_map.items()}
+        self.symmetry_multiplier = self.cubicsetup.cubic_energy_multiplier_from_pose(pose_at_initial_position)
+        self.set_jump_names()
         self.buffer = buffer
-        if dofspecification:
-            self.dofspecification = dofspecification
-        else:
-            self.dofspecification = default_dofs
-        self.cubicdofs = CubicDofs(pose_at_initial_position, self.dofspecification)
+        self.dof_spec = dof_spec
         self.set_boundary(pose_at_initial_position)
-        self.current_limits = {k:{kk:{"min": None, "max": None} for kk in v} for k, v in self.dofspecification.items()}
+        self.current_limits = {k:{kk:{"min": None, "max": None} for kk in v} for k, v in self.dof_spec.dof_spec.items()}
         assert sd != 0
         assert well_depth != 0
         self.sd = sd
         self.well_depth = well_depth
+
+    def set_jump_names(self):
+        jid = self.cubicsetup.get_jumpidentifier()
+        self.z = f"JUMP{jid}fold1"
+        self.x = f"JUMP{jid}fold111"
+        self.z_upstream = f"JUMP{jid}fold"
+        self.x_upstream = f"JUMP{jid}fold11"
+        self.angle_z = f"JUMP{jid}fold1_z"
+        self.com_angle_x = f"JUMP{jid}fold111_x"
+        self.com_angle_y = f"JUMP{jid}fold111_y"
+        self.com_angle_z = f"JUMP{jid}fold111_z"
 
     @staticmethod
     def calculate_bound_penalty(x, sd_, lb_, ub_, rswitch_=0.5):
@@ -72,6 +83,7 @@ class CubicBoundary:
             return 2 * rswitch_ * delta - rswitch_ * rswitch_
         else:
             return delta * delta
+
 
     @staticmethod
     def calculate_well_penalty(x, x0_, well_depth_):
@@ -99,26 +111,28 @@ class CubicBoundary:
         return self.calculate_well_penalty(self.get_x_boundary_angle(pose), self.convert_to_rad(90), self.well_depth) * self.symmetry_multiplier
 
     def calculate_z_distance_penalty(self, pose):
-        return self.calculate_bound_penalty(abs(self.get_z_distance(pose)), self.sd, *self.get_boundary("JUMPHFfold1", "z"))
+        jid = CubicSetup.get_jumpidentifier_from_pose(pose)
+        return self.calculate_bound_penalty(abs(self.get_z_distance(pose)), self.sd, *self.get_boundary(self.z, "z"))
 
     def calculate_x_distance_penalty(self, pose):
-        return self.calculate_bound_penalty(abs(self.get_x_distance(pose)), self.sd, *self.get_boundary("JUMPHFfold111", "x"))
+        jid = CubicSetup.get_jumpidentifier_from_pose(pose)
+        return self.calculate_bound_penalty(abs(self.get_x_distance(pose)), self.sd, *self.get_boundary(self.x, "x"))
 
     def calculate_angle_z_penalty(self, pose):
         return self.calculate_bound_penalty(self.get_angle_z(pose), self.sd,
-                                                      *self.get_boundary("JUMPHFfold1_z", "angle_z", in_rad=True))
+                                                      *self.get_boundary(self.angle_z, "angle_z", in_rad=True))
 
     def calculate_com_angle_x_penalty(self, pose):
         return self.calculate_bound_penalty(self.get_com_angle_x(pose), self.sd,
-                                     *self.get_boundary("JUMPHFfold111_x", "angle_x", in_rad=True))
+                                     *self.get_boundary(self.com_angle_x, "angle_x", in_rad=True))
 
     def calculate_com_angle_y_penalty(self, pose):
         return self.calculate_bound_penalty(self.get_com_angle_y(pose), self.sd,
-                                            *self.get_boundary("JUMPHFfold111_y", "angle_y", in_rad=True))
+                                            *self.get_boundary(self.com_angle_y, "angle_y", in_rad=True))
 
     def calculate_com_angle_z_penalty(self, pose):
         return self.calculate_bound_penalty(self.get_com_angle_z(pose), self.sd,
-                                            *self.get_boundary("JUMPHFfold111_z", "angle_z", in_rad=True))
+                                            *self.get_boundary(self.com_angle_z, "angle_z", in_rad=True))
 
     def get_contribution_from_each_score(self, pose):
         d = {"z_boundary_angle": self.calculate_z_boundary_angle_penalty(pose),
@@ -191,46 +205,46 @@ class CubicBoundary:
     #-- AtomID getters -- #
 
     def get_angle_z_atomids(self, pose):
-        return AtomID(2, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold1_z"))), \
-               AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold1_z"))), \
-               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold1_z"))), \
-               AtomID(2, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold1_z")))
+        return AtomID(2, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.angle_z))), \
+               AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.angle_z))), \
+               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.angle_z))), \
+               AtomID(2, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.angle_z)))
 
     def get_com_angle_x_atomids(self, pose):
-        return AtomID(3, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_x"))), \
-               AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_x"))), \
-               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_x"))), \
-               AtomID(3, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_x")))
+        return AtomID(3, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_x))), \
+               AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_x))), \
+               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_x))), \
+               AtomID(3, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_x)))
 
     def get_com_angle_y_atomids(self, pose):
-        return AtomID(2, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_y"))), \
-               AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_y"))), \
-               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_y"))), \
-               AtomID(2, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_y")))
+        return AtomID(2, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_y))), \
+               AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_y))), \
+               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_y))), \
+               AtomID(2, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_y)))
 
     def get_com_angle_z_atomids(self, pose):
-        return AtomID(2, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_z"))), \
-               AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_z"))), \
-               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_z"))), \
-               AtomID(2, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111_z")))
+        return AtomID(2, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_z))), \
+               AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_z))), \
+               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_z))), \
+               AtomID(2, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.com_angle_z)))
 
     def get_z_atomids(self, pose):
-        return AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold1"))), \
-        AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold1")))
+        return AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.z))), \
+        AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.z)))
 
     def get_x_atomids(self, pose):
-        return AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111"))), \
-               AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111")))
+        return AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.x))), \
+               AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.x)))
 
     def get_z_boundary_atom_ids(self, pose):
-        return AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold1"))), \
-        AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold1"))), \
-        AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold")))
+        return AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.z))), \
+        AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.z))), \
+        AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.z_upstream)))
 
     def get_x_boundary_atom_ids(self, pose):
-        return AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111"))), \
-               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold111"))), \
-               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, "JUMPHFfold11")))
+        return AtomID(1, pose.fold_tree().downstream_jump_residue(sym_dof_jump_num(pose, self.x))), \
+               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.x))), \
+               AtomID(1, pose.fold_tree().upstream_jump_residue(sym_dof_jump_num(pose, self.x_upstream)))
 
     #-- Constrain setters --#
 
@@ -287,17 +301,24 @@ class CubicBoundary:
 
     def set_constraints(self, pose):
         """Sets cubic symmetrical constraints for the pose. sd is the standard deviation and a smaller number means a larger penalty."""
-        self.current_positions = self.cubicdofs.get_positions_as_dict(pose)
-        self.add_z_constraints(pose, self.create_bounded_func(*self.get_boundary("JUMPHFfold1", "z")))
-        self.add_x_constraints(pose, self.create_bounded_func(*self.get_boundary("JUMPHFfold111", "x")))
-        self.add_angle_z_constraints(pose, self.create_bounded_func(*self.get_boundary("JUMPHFfold1_z", "angle_z", in_rad=True)))
-        self.add_com_angle_x_constraints(pose, self.create_bounded_func(*self.get_boundary("JUMPHFfold111_x", "angle_x", in_rad=True)))
-        self.add_com_angle_y_constraints(pose, self.create_bounded_func(*self.get_boundary("JUMPHFfold111_y", "angle_y", in_rad=True)))
-        self.add_com_angle_z_constraints(pose, self.create_bounded_func(*self.get_boundary("JUMPHFfold111_z", "angle_z", in_rad=True)))
+        self.current_positions = self.dof_spec.get_positions_as_dict(pose)
+        jid = CubicSetup.get_jumpidentifier_from_pose(pose)
+        self.add_z_constraints(pose, self.create_bounded_func(*self.get_boundary(self.z, "z")))
+        self.add_x_constraints(pose, self.create_bounded_func(*self.get_boundary(self.x, "x")))
+        self.add_angle_z_constraints(pose, self.create_bounded_func(*self.get_boundary(self.angle_z, "angle_z", in_rad=True)))
+        self.add_com_angle_x_constraints(pose, self.create_bounded_func(*self.get_boundary(self.com_angle_x, "angle_x", in_rad=True)))
+        self.add_com_angle_y_constraints(pose, self.create_bounded_func(*self.get_boundary(self.com_angle_y, "angle_y", in_rad=True)))
+        self.add_com_angle_z_constraints(pose, self.create_bounded_func(*self.get_boundary(self.com_angle_z, "angle_z", in_rad=True)))
+
+        # -------------------
+        # There used to be constrains on the translational dofs of z and x but this unfortunately resulted in an occasional
+        # RuntimeError: "0-length bonds in AngleConstraint" when the z or x dofs were exactly zero, which could happen during minimization.
+        # Therefore these are uncommented and hence removed. I left the old text below intact in case someone would read it.
+        # -------------------
         # the system can go out of bounce in 3 ways:
         # 1. z is below 0
         # 2. x is below 0
-        # 3. angle_z cross the -/+ 36 barrier
+        # 3. angle_z cross the cn -/+ barrier
         # Option 3 is already protected by the constraint in angle_z alone. However, the distance for x and z can drop below 0 and
         # then go into a range with 0 penalty inside -min and -max. This is because the distance will always be positive in the
         # constraint calculation. Therefore, we add yet another constrain to the z/x distance that penalizes a drop below 0.
@@ -305,8 +326,8 @@ class CubicBoundary:
         # if it is = 180 it is good, if 0 it is bad, we set the threshold at 90. We don't want any penalty as long as the
         # z/x distance is above zero and that is accomplished by setting the angle to -1 which is an impossible value to get as the
         # angles are always taken as positive.
-        self.add_z_constrain_below_0(pose, self.create_well_func(self.convert_to_rad(90)))
-        self.add_x_constrain_below_0(pose, self.create_well_func(self.convert_to_rad(90)))
+        # self.add_z_constrain_below_0(pose, self.create_well_func(self.convert_to_rad(90)))
+        # self.add_x_constrain_below_0(pose, self.create_well_func(self.convert_to_rad(90)))
 
     def convert_to_degrees(self, rad):
         return rad * 180 / math.pi
@@ -325,33 +346,33 @@ class CubicBoundary:
 
     def set_boundary(self, pose_at_initial_position):
         self.boundaries = {}
-        all_current_pos = self.cubicdofs.get_positions_as_dict(pose_at_initial_position)
-        for jump_name, jumpdof_params in self.dofspecification.items():
+        all_current_pos = self.dof_spec.get_positions_as_dict(pose_at_initial_position)
+        for jump_name, jumpdof_params in self.dof_spec.dof_spec.items():
             self.boundaries[jump_name] = {}
             for dof_name, dof_params in jumpdof_params.items():
                 self.boundaries[jump_name][dof_name] = {"min": None, "max": None}
-                if self.dofspecification[jump_name][dof_name].get("limit_movement"):
-                    init_min = self.dofspecification[jump_name][dof_name].get("min")
-                    init_max = self.dofspecification[jump_name][dof_name].get("max")
-                    assert init_min and init_max, f"limit_movement is set to True for jump: {jump_name} and dof: {dof_name} but min and max are not set"
+                if self.dof_spec.dof_spec[jump_name][dof_name].get("limit_movement"):
+                    init_min = self.dof_spec.dof_spec[jump_name][dof_name].get("min")
+                    init_max = self.dof_spec.dof_spec[jump_name][dof_name].get("max")
+                    assert init_min is not None and init_max is not None, f"limit_movement is set to True for jump: {jump_name} and dof: {dof_name} but min and max are not set"
                     current_pos = all_current_pos[jump_name][dof_name]
                     min_bound = current_pos + init_min
                     max_bound = current_pos + init_max
-                    if "JUMPHFfold1" == jump_name:
+                    if self.z == jump_name:
                         if dof_name == "z":
-                            assert current_pos >= 0 - self.buffer, "Jump: JUMPHFfold1 and dof: z is outside its cubic bounds!"
+                            assert current_pos >= 0 - self.buffer, f"Jump: {self.z} and dof: z is outside its cubic bounds!"
                             # if the minimum goes below zero we have to modify the current minimum
                             if current_pos + init_min < 0:
                                 min_bound = 0
                         elif dof_name == "angle_z":
-                            a_min, a_max = self.symmetrysetup.angle_z_distance(pose_at_initial_position)
+                            a_min, a_max = self.cubicsetup.angle_z_distance(pose_at_initial_position)
                             if init_min < a_min:
                                 min_bound = current_pos + a_min
                             if init_max > a_max:
                                 max_bound = current_pos + a_max
-                    elif "JUMPHFfold111" == jump_name:
+                    elif self.x == jump_name:
                         if dof_name == "x":
-                            assert current_pos >= 0 - self.buffer, "Jump: JUMPHFfold111 and dof: x has exceeded its cubic bounds!"
+                            assert current_pos >= 0 - self.buffer, f"Jump: {self.x} and dof: x has exceeded its cubic bounds!"
                             # if the minimum goes below zero we have to modify the current minimum
                             if current_pos + init_min < 0:
                                 min_bound = 0
@@ -362,9 +383,9 @@ class CubicBoundary:
         """Put the pose inside the specified bounds if it is outside its bounds.
         If randomize == True it will put the pose at random position inside the bounds,
         else it will put it at the nearest boundary +/- self.buffer."""
-        for jump_name, jumpdof_params in self.dofspecification.items():
+        for jump_name, jumpdof_params in self.dof_spec.dof_spec.items():
             for dof_name, _ in jumpdof_params.items():
-                if self.dofspecification[jump_name][dof_name].get("limit_movement", False):
+                if self.dof_spec.dof_spec[jump_name][dof_name].get("limit_movement", False):
                     if not self.dof_within_bounds(pose, jump_name, dof_name, raise_warning=raise_warning):
                         if randomize:
                             val_to_set = random.uniform(*self.get_boundary(jump_name, dof_name, add_buffer=True))
@@ -380,8 +401,8 @@ class CubicBoundary:
     def construct_rigidbody_mover(self, pose, rb_name="") -> RigidBodyDofAdaptiveMover:
         """Construct rigidbodymover."""
         rb_mover = RigidBodyDofAdaptiveMover(rb_name)
-        self.current_positions = self.cubicdofs.get_positions_as_dict(pose)
-        for jump_name, jumpdof_params in self.dofspecification.items():
+        self.current_positions = self.dof_spec.get_positions_as_dict(pose)
+        for jump_name, jumpdof_params in self.dof_spec.dof_spec.items():
             for dof_name, dof_params in jumpdof_params.items():
                 # print(*self.get_extra_options(pose, jump_name, dof_name, dof_params))
                 extra_options = self.get_extra_options(pose, jump_name, dof_name, dof_params)
@@ -415,12 +436,17 @@ class CubicBoundary:
                 return False
         return True
 
+
     def all_dofs_within_bounds(self, pose, raise_assertion=False, raise_warning=False):
         """Checks if all the dofs of the pose are within bounds."""
-        for jump_name, jumpdof_params in self.dofspecification.items():
+        for jump_name, jumpdof_params in self.dof_spec.dof_spec.items():
             for dof_name, dof_params in jumpdof_params.items():
-                if self.dofspecification[jump_name][dof_name].get("limit_movement", False):
+                if self.dof_spec.dof_spec[jump_name][dof_name].get("limit_movement", False):
                     if not self.dof_within_bounds(pose, jump_name, dof_name):
+                        if raise_assertion:
+                            raise AssertionError(f"JUMP {jump_name} with DOF {dof_name} is not within bounds")
+                        elif raise_warning:
+                            warnings.warn(f"JUMP {jump_name} with DOF {dof_name} is not within bounds")
                         return False
         return True
 
@@ -434,7 +460,7 @@ class CubicBoundary:
         return min_peturbation, max_peturbation
 
     def set_limits(self, pose, jump_name, dof_name, dof_params):
-        if self.dofspecification[jump_name][dof_name].get("limit_movement", False):
+        if self.dof_spec.dof_spec[jump_name][dof_name].get("limit_movement", False):
             cmin, cmax = self.get_min_max(jump_name, dof_name)
             dof_params["min"] = cmin
             dof_params["max"] = cmax

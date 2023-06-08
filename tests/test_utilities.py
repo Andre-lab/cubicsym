@@ -37,7 +37,7 @@ def test_right_to_left_mapping():
                                       pymol=False)
             sds = SymDefSwapper(pose_sym_org, symdef)
             sm = SymmetryMapper()
-            for cs_org, pose_compare, fold, number in zip((sds.foldHF_setup, sds.fold3_setup, sds.fold2_setup),
+            for cs_org, pose_compare, fold, number in zip((sds.foldHF_setup, sds.fold3F_setup, sds.fold2F_setup),
                                                   (pose_sym_org, sds.create_3fold_pose_from_HFfold(pose_sym_org),
                                                    sds.create_2fold_pose_from_HFfold(pose_sym_org)), ("HF", "3F", "2F"), ("HF", "31", "21")):
                 cs = CubicSetup()
@@ -154,6 +154,6 @@ def test_right_to_left_mapping():
                 # pmm.apply(input_pose_flip)
                 # pmm.apply(pose_sym_org)
 
-                rmsd = cs.CA_rmsd_hf_map(input_pose, pose_sym_org, same_handedness=False)
-                rmsd_flip = cs.CA_rmsd_hf_map(input_pose_flip, pose_sym_org, same_handedness=False)
+                rmsd = cs.rmsd_hf_map(input_pose, pose_sym_org, same_handedness=False)
+                rmsd_flip = cs.rmsd_hf_map(input_pose_flip, pose_sym_org, same_handedness=False)
                 assert rmsd_threshold > rmsd or rmsd_threshold > rmsd_flip

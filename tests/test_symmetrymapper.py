@@ -85,10 +85,10 @@ def test_prediction_structures():
                 cs_org = sds.foldHF_setup
                 number = "HF"
             elif fold == "3F":
-                cs_org = sds.fold3_setup
+                cs_org = sds.fold3F_setup
                 number = "31"
             else:
-                cs_org = sds.fold2_setup
+                cs_org = sds.fold2F_setup
                 number = "21"
 
             cs = CubicSetup()
@@ -112,7 +112,7 @@ def test_prediction_structures():
             for pose, flip in zip((input_pose_asym, input_pose_flip_asym), ("", "flip")):
                 sa = SetupAligner(cs, sds.foldHF_setup, use_hf_chain_mapping=True, overlap_tol=0.05, x_start=x_start, z_start=z_start,
                                   al_to_monomeric=pose_sym_org_asym, al_from_monomeric=pose,
-                                  same_handedness=sds.foldHF_setup.is_rightanded(), behavior="global",
+                                  same_handedness=sds.foldHF_setup.calculate_if_rightanded(), behavior="global",
                                   assert_overlap_tol=False)
                 sa.apply()
                 if sa.final_rmsd < 2:
@@ -221,10 +221,10 @@ def test_native_structures():
                 cs_org = sds.foldHF_setup
                 number = "HF"
             elif fold == "3F":
-                cs_org = sds.fold3_setup
+                cs_org = sds.fold3F_setup
                 number = "31"
             else:
-                cs_org = sds.fold2_setup
+                cs_org = sds.fold2F_setup
                 number = "21"
 
 
@@ -260,7 +260,7 @@ def test_native_structures():
             for pose in (input_pose_asym, input_pose_flip_asym):
                 sa = SetupAligner(cs, sds.foldHF_setup, use_hf_chain_mapping=True, overlap_tol=0.05, x_start=x_start, z_start=z_start,
                                   al_to_monomeric=pose_sym_org_asym, al_from_monomeric=pose,
-                                  same_handedness=sds.foldHF_setup.is_rightanded(), behavior="fold_rotation",
+                                  same_handedness=sds.foldHF_setup.calculate_if_rightanded(), behavior="fold_rotation",
                                   assert_overlap_tol=False)
                 sa.apply()
                 if sa.final_rmsd < 0.5:
@@ -318,8 +318,8 @@ def test_different_rotations():
                 set_jumpdof_str_str(input_pose, jump, dof, val)
             elif dof == "angle_z" and "fold1_z" in jump:
                 set_jumpdof_str_str(input_pose, jump, dof, val)
-        rmsd = cs.CA_rmsd_hf_map(input_pose, pose_hf, same_handedness=True)
-        rmsd_flip = cs.CA_rmsd_hf_map(input_pose_flip, pose_hf, same_handedness=True)
+        rmsd = cs.rmsd_hf_map(input_pose, pose_hf, same_handedness=True)
+        rmsd_flip = cs.rmsd_hf_map(input_pose_flip, pose_hf, same_handedness=True)
         assert rmsd < 0.1 or rmsd_flip < 0.1
 
 def test_run_recapitulation():
@@ -358,7 +358,7 @@ def test_run_recapitulation():
                 pose_hf_asym = setup_test(name="T", file=pdb, symmetrize=False, reinitialize=False, mute=True, return_symmetry_file=False,
                                              pymol=False)
                 sds = SymDefSwapper(pose_hf, symdef)
-                cs_hf, cs_3, cs_2 = sds.foldHF_setup, sds.fold3_setup, sds.fold2_setup
+                cs_hf, cs_3, cs_2 = sds.foldHF_setup, sds.fold3F_setup, sds.fold2F_setup
 
                 # make the cn
                 if cn == "H":
@@ -374,10 +374,10 @@ def test_run_recapitulation():
                 pose_XF = pose_from_file(temp_id)
 
                 cs, input_pose, input_pose_flip, input_pose_asym, input_pose_flip_asym = sm.run(model=pose_XF, cn=f"{3 if cn == 'H' else cn}", symmetry=f"{'T'}", chains_allowed=None)
-                set_jumpdof_str_str(input_pose_flip, "JUMP21fold1", "z", sds.fold2_setup.get_dof_value("JUMP21fold1", "z", "translation"))
-                set_jumpdof_str_str(input_pose_flip, "JUMP21fold111", "x", sds.fold2_setup.get_dof_value("JUMP21fold111", "x", "translation"))
-                set_jumpdof_str_str(input_pose, "JUMP21fold1", "z", sds.fold2_setup.get_dof_value("JUMP21fold1", "z", "translation"))
-                set_jumpdof_str_str(input_pose, "JUMP21fold111", "x", sds.fold2_setup.get_dof_value("JUMP21fold111", "x", "translation"))
+                set_jumpdof_str_str(input_pose_flip, "JUMP21fold1", "z", sds.fold2F_setup.get_dof_value("JUMP21fold1", "z", "translation"))
+                set_jumpdof_str_str(input_pose_flip, "JUMP21fold111", "x", sds.fold2F_setup.get_dof_value("JUMP21fold111", "x", "translation"))
+                set_jumpdof_str_str(input_pose, "JUMP21fold1", "z", sds.fold2F_setup.get_dof_value("JUMP21fold1", "z", "translation"))
+                set_jumpdof_str_str(input_pose, "JUMP21fold111", "x", sds.fold2F_setup.get_dof_value("JUMP21fold111", "x", "translation"))
                 # for jump, dof, val in info[info["pdb_base"] == f"{pdb}_{cn}F"][["jump", "dof", "val"]].values:
                 #     # IT does not need the rotations as they are stored in rotation of the monomer
                 #     if dof == "x":
@@ -400,13 +400,13 @@ def test_run_recapitulation():
 
                 # quick test
                 # cs is always righthanded as it is created from the normalized symdefs, so theres no need to do cs.is_righthanded == cs_hf.is_righthanded as in the test_symdefnormalizer
-                rmsd = cs.CA_rmsd_hf_map(input_pose, pose_hf, same_handedness=cs_hf.is_rightanded()) # cs is always righthanded as it is created from the normalized symdefs, so theres no need to do cs.is_righthanded == cs_hf.is_righthanded as in the test_symdefnormalizer
-                rmsd_flip = cs.CA_rmsd_hf_map(input_pose_flip, pose_hf, same_handedness=cs_hf.is_rightanded())
+                rmsd = cs.rmsd_hf_map(input_pose, pose_hf, same_handedness=cs_hf.calculate_if_rightanded()) # cs is always righthanded as it is created from the normalized symdefs, so theres no need to do cs.is_righthanded == cs_hf.is_righthanded as in the test_symdefnormalizer
+                rmsd_flip = cs.rmsd_hf_map(input_pose_flip, pose_hf, same_handedness=cs_hf.calculate_if_rightanded())
                 # assert rmsd < 0.1 or rmsd_flip < 0.1
                 print(f"{pdb} WORKED!")
-                sa = SetupAligner(cs, cs_hf, use_hf_chain_mapping=True, overlap_tol=0.05, x_start=sds.fold2_setup.get_dof_value("JUMP21fold111", "x", "translation"), z_start=sds.fold2_setup.get_dof_value("JUMP21fold1", "z", "translation"),
+                sa = SetupAligner(cs, cs_hf, use_hf_chain_mapping=True, overlap_tol=0.05, x_start=sds.fold2F_setup.get_dof_value("JUMP21fold111", "x", "translation"), z_start=sds.fold2F_setup.get_dof_value("JUMP21fold1", "z", "translation"),
                                   al_to_monomeric=pose_hf_asym, al_from_monomeric=input_pose_flip_asym,
-                                  same_handedness=cs_hf.is_rightanded() # cs is always righthanded as it is created from the normalized symdefs, so theres no need to do cs.is_righthanded == cs_hf.is_righthanded as in the test_symdefnormalizer
+                                  same_handedness=cs_hf.calculate_if_rightanded()  # cs is always righthanded as it is created from the normalized symdefs, so theres no need to do cs.is_righthanded == cs_hf.is_righthanded as in the test_symdefnormalizer
                                   )
                 # sa = SetupAligner(cs, cs_hf, use_hf_chain_mapping=True, overlap_tol=0.05, x_start=start_x, z_start=start_z, angle_z_start=angle_z_start,
                 #                   al_to_monomeric=pose_hf_asym, al_from_monomeric=input_pose_flip_asym,
@@ -456,7 +456,7 @@ def test_run():
                 pose_hf_asym = setup_test(name="T", file=pdb, symmetrize=False, reinitialize=False, mute=True, return_symmetry_file=False,
                                              pymol=False)
                 sds = SymDefSwapper(pose_hf, symdef)
-                cs_hf, cs_3, cs_2 = sds.foldHF_setup, sds.fold3_setup, sds.fold2_setup
+                cs_hf, cs_3, cs_2 = sds.foldHF_setup, sds.fold3F_setup, sds.fold2F_setup
                 # remove ^^^^^^^
 
                 cn = model.parent.stem.split("_")[1]

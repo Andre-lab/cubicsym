@@ -11,6 +11,9 @@ import numpy as np
 from itertools import combinations
 from symmetryhandler.reference_kinematics import get_dofs
 from pyrosetta.rosetta.core.pose.symmetry import is_symmetric
+from pyrosetta.rosetta.basic.datacache import CacheableStringMap
+from pyrosetta.rosetta.basic.datacache import CacheableStringFloatMap
+from pyrosetta.rosetta.core.pose.datacache import CacheableDataType
 
 def cut_all_but_chains(pose, *chains):
     """Cuts all chain in the pose except for the chains given."""
@@ -161,13 +164,14 @@ def get_base_from_pose(pose):
 def reduce_chain_map_to_indices(chain_map, *poses):
     bases = [get_base_from_pose(pose) for pose in poses]
     indices = []
-    if "HF" in bases:
-        indices.append(0)
-    elif "3F" in bases:
-        indices.append(1)
-    elif "2F" in bases:
-        indices.append(2)
-    return [tuple([c for n, c in enumerate(cm) if n in indices]) for cm in chain_map]
+    for base in bases:
+        if "HF" == base:
+            indices.append(0)
+        if "3F" == base:
+            indices.append(1)
+        if "2F" == base:
+            indices.append(2)
+    return [tuple([cm[i] for i in indices]) for cm in chain_map]
 
 def get_chain_map(symmetry_type, is_righthanded):
     """Returns a list of the mapping between each chain (in Rosetta numbering) between a HF-, 3- and 2-fold based setup.
@@ -231,4 +235,36 @@ def map_2f_right_to_left_hf(symmetry_type):
 def get_jumpidentifier(pose) -> str:
     return list(get_dofs(pose).keys())[0].split("JUMP")[-1].split("fold")[0]
 
+def copy_pose_id_to_its_bases(pose_w_id, *pose_w_other_bases):
+    """Copies the id in pose_w_id to every other pose in pose_w_other_bases and makes sure the base are also labelled correctly."""
+    assert is_symmetric(pose_w_id)
+    # extract only the id part, not the base part
+    if pose_w_id.data().has(CacheableDataType.ARBITRARY_STRING_DATA):
+        stringmap = pose_w_id.data().get_ptr(CacheableDataType.ARBITRARY_STRING_DATA)
+        id_ = stringmap.map()["id"]
+        if "+" in id_:
+            id_ = id_.split("+")[0]
+            for pose in pose_w_other_bases:
+                add_id_to_pose_w_base(pose, id_)
+        else:
+            for pose in pose_w_other_bases:
+                add_base_to_pose(pose)
+    else:
+        raise ValueError("pose_w_id does not have an id!")
+    # reconstruct with new base and the extracted id
 
+def add_base_to_pose(pose):
+    assert is_symmetric(pose)
+    if not pose.data().has(CacheableDataType.ARBITRARY_STRING_DATA):
+        pose.data().set(CacheableDataType.ARBITRARY_STRING_DATA, CacheableStringMap())
+    stringmap = pose.data().get_ptr(CacheableDataType.ARBITRARY_STRING_DATA)
+    base = get_base_from_pose(pose)
+    stringmap.map()["id"] = f"{base}"
+
+def add_id_to_pose_w_base(pose, id_):
+    assert is_symmetric(pose)
+    if not pose.data().has(CacheableDataType.ARBITRARY_STRING_DATA):
+        pose.data().set(CacheableDataType.ARBITRARY_STRING_DATA, CacheableStringMap())
+    stringmap = pose.data().get_ptr(CacheableDataType.ARBITRARY_STRING_DATA)
+    base = get_base_from_pose(pose)
+    stringmap.map()["id"] = f"{id_}+{base}"

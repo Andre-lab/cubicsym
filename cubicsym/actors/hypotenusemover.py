@@ -8,7 +8,7 @@ HypotenuseMover class
 import numpy as np
 from pyrosetta.rosetta.core.pose.symmetry import sym_dof_names, sym_dof_jump_num
 from symmetryhandler.mathfunctions import rotation_matrix, vector_angle, vector_projection
-from symmetryhandler.kinematics import get_x_translation, get_z_translation
+from symmetryhandler.reference_kinematics import get_x_translation, get_z_translation
 from enum import Enum
 from pyrosetta.rosetta.numeric import xyzVector_double_t
 

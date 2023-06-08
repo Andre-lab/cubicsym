@@ -6,14 +6,126 @@ Test of SymmetrySlider
 @Date: 6/7/22
 """
 
+def test_slide_all_single_bb():
+    from cubicsym.actors.cubicsymmetryslider import CubicSymmetrySlider
+    from shapedesign.src.visualization.visualizer import Visualizer
+    from cubicsym.cubicsetup import CubicSetup
+    from cubicsym.kinematics import randomize_all_dofs_positive_trans, translate_away, randomize_all_dofs, get_dofspecification_for_pose
+    from simpletestlib.test import setup_test
+    from pyrosetta import init
+    from symmetryhandler.reference_kinematics import get_jumpdof_str_int, get_dofs, perturb_jumpdof_str_str
+    from cloudcontactscore.cloudcontactscorecontainer import CloudContactScoreContainer
+    from cubicsym.cubicdofs import CubicDofs
+    import random
+    import math
+    random.seed(661)
+    sym_files = {"I": ["1STM", "6S44"],
+                 "T": ["1MOG", "1H0S"],
+                 "O": ["1AEW", "1P3Y"]}
+
+    init()
+    # vis = Visualizer(name="pose", store_scenes=False, store_states=True, representation=["cartoon"], reinitialize=False)
+    for sym, files in sym_files.items():
+        for pdb in files:
+            pose_mono, pmm, cmd, symdef = setup_test(name=sym, file=pdb, return_symmetry_file=True, mute=True, symmetrize=False)
+            pmm.keep_history(True)
+
+            # create HF, 3 and 2-fold independently
+            cs_hf = CubicSetup()
+            cs_hf.load_norm_symdef(sym, "HF")
+            pose_HF = pose_mono.clone()
+            cs_hf.make_symmetric_pose(pose_HF)
+            translate_away(pose_HF)
+            vals_hf = [] #randomize_all_dofs_positive_trans(pose_HF, fold1=50, fold1_z=180, fold111=50, fold111_x=180, fold111_y=0, fold111_z=180, return_vals=True)
+            # perturb_jumpdof_str_str(pose_HF, f"JUMPHFfold1_z", "angle_z", 180)
+            # -----
+            cs_2f = CubicSetup()
+            cs_2f.load_norm_symdef(sym, "2F")
+            pose_2F = pose_mono.clone()
+            cs_2f.make_symmetric_pose(pose_2F)
+            translate_away(pose_2F)
+            vals_2f = [] # randomize_all_dofs_positive_trans(pose_2F, fold1=50, fold1_z=180, fold111=50, fold111_x=180, fold111_y=0, fold111_z=180, return_vals=True)
+            # perturb_jumpdof_str_str(pose_2F, f"JUMP21fold1_z", "angle_z", -180)
+            # -----
+            cs_3f = CubicSetup()
+            cs_3f.load_norm_symdef(sym, "3F")
+            pose_3F = pose_mono.clone()
+            cs_3f.make_symmetric_pose(pose_3F)
+            translate_away(pose_3F)
+            vals_3f = [] #randomize_all_dofs_positive_trans(pose_3F, fold1=50, fold1_z=180, fold111=50, fold111_x=180, fold111_y=180, fold111_z=180, return_vals=True)
+            # perturb_jumpdof_str_str(pose_3F, f"JUMP31fold1_z", "angle_z", 180)
+
+            for pose, cs, vals in zip([pose_3F, pose_2F, pose_HF], [cs_3f, cs_2f, cs_hf], [vals_3f, vals_2f, vals_hf]):
+                ccsc = CloudContactScoreContainer(pose, cs.make_symmetry_file_on_tmp_disk(), CubicDofs(pose), multiple_bbs=False)
+                sl = CubicSymmetrySlider(pose, cs.make_symmetry_file_on_tmp_disk(), ccsc, visualizer=None, trans_mag=2, pymolmover=None,
+                                         debug_mode=True)
+                jid = CubicSetup.get_jumpidentifier_from_pose(pose)
+                z_pre = get_jumpdof_str_int(pose, f"JUMP{jid}fold1", 3)
+                # x_pre = get_jumpdof_str_int(pose, f"JUMP{jid}fold111", 1)
+                dofs_pre = get_dofs(pose)
+                cmd.do("reinitialize")
+                # change visualizer top visand pymolmover to pmm if you want to see the sliding
+                # if pdb == "1STM" and  jid == "21":
+                #     sl = CubicSymmetrySlider(pose, cs.make_symmetry_file_on_tmp_disk(), visualizer=None, trans_mag=2, pymolmover=pmm, debug_mode=True)
+                # else:
+                sl.apply(pose)
+                z_post = get_jumpdof_str_int(pose, f"JUMP{jid}fold1", 3)
+
+                ######################
+                # Test 1: z is either the same as initially or less
+                ######################
+                try:
+                    assert (z_pre >= z_post or math.isclose(z_pre, z_post, abs_tol=1e-2)), f"{z_pre}, {z_post}, {get_dofs(pose)}"
+                except AssertionError as e:
+                    print("===========================0")
+                    print(f"{pdb} Failed")
+                    print("base:", CubicSetup.get_base_from_pose(pose))
+                    print("hit status:", sl.get_last_hit_status())
+                    print("Vals given:", ", ".join(map(str, vals)))
+                    print("before:", dofs_pre)
+                    print("now:", get_dofs(pose))
+                    print("===========================0")
+                    raise AssertionError
+                ######################
+                # Test 2: z never goes below zero
+                ######################
+                try:
+                    assert z_post > 0, f"{z_pre}, {z_post}, {get_dofs(pose)}"
+                except AssertionError as e:
+                    print(f"{pdb} Failed")
+                    print("===========================0")
+                    print("base:", CubicSetup.get_base_from_pose(pose))
+                    print("hit status:", sl.get_last_hit_status())
+                    print("Vals given:", ", ".join(map(str, vals)))
+                    print("before:", dofs_pre)
+                    print("now:", get_dofs(pose))
+                    print("===========================0")
+                    raise AssertionError
+
+                ######################
+                # Test 3: that if z is the same it is either because the folds hit each other immedially or never
+                ######################
+                if math.isclose(z_pre, z_post, abs_tol=1e-2):
+                    data = sl.get_last_hit_status()[CubicSetup.get_base_from_pose(pose)]
+                    hit = data["hit"]
+                    moves = data["moves"]
+                    assert (hit == False) or (moves == sl.max_slide_attemps) or (moves == 1)
+                print("===========================0")
+                print(f"{pdb} OK")
+                print("hit status:", sl.get_last_hit_status())
+                print("base:", CubicSetup.get_base_from_pose(pose))
+                print("before:", dofs_pre)
+                print("now:", get_dofs(pose))
+                print("===========================0")
+
+            print(f"{pdb} FINAL OK")
+
 def test_slide_on_T_sym():
     from cubicsym.actors.cubicsymmetryslider import CubicSymmetrySlider
     from symmetryhandler.reference_kinematics import perturb_jumpdof_str_int
     from shapedesign.src.visualization.visualizer import Visualizer
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from pyrosetta.rosetta.core.scoring import CA_rmsd
-    from pyrosetta import pose_from_file
-    from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
     from simpletestlib.test import setup_test
     import random
     random.seed(661)
@@ -23,7 +135,7 @@ def test_slide_on_T_sym():
         pmm.keep_history(True)
         vis = Visualizer(name="pose", store_scenes=False, store_states=True, representation=["cartoon"], reinitialize=False)
         sf = SymDefSwapper(poseo, symdef, vis)
-        sl = CubicSymmetrySlider(poseo, symdef, visualizer=vis, trans_mag=2, pymolmover=pmm)
+        sl = CubicSymmetrySlider(poseo, symdef, None, visualizer=vis, trans_mag=2, pymolmover=pmm)
 
         # rescue a HF fold
         poseHF = poseo.clone()
@@ -76,7 +188,7 @@ def test_slide_on_O_sym():
         pmm.keep_history(True)
         vis = Visualizer(name="pose", store_scenes=False, store_states=True, representation=["cartoon"], reinitialize=False)
         sf = SymDefSwapper(poseo, symdef, vis)
-        sl = CubicSymmetrySlider(poseo, symdef, visualizer=vis, trans_mag=2, pymolmover=pmm)
+        sl = CubicSymmetrySlider(poseo, symdef, None, visualizer=vis, trans_mag=2, pymolmover=pmm)
 
         # rescue a HF fold
         poseHF = poseo.clone()
@@ -136,7 +248,7 @@ def test_apply_global_slide():
     perturb_jumpdof(pose, "JUMPHFfold1111", 6, z_rot2)
     print("z_trans: ", z_trans, "x_trans: ", x_trans, "z_rot1", z_rot1, "x_rot2", x_rot2, "y_rot2", y_rot2, "z_rot2", z_rot2)
     pmm.apply(pose)
-    sl = CubicSymmetrySlider(pose, None, global_slide=True, visualizer=vis)
+    sl = CubicSymmetrySlider(pose, None, None, visualizer=vis)
     sl.apply(pose)
 
 
@@ -150,7 +262,7 @@ def test_multiple_applies():
     pose, pmm, cmd, symdef = setup_test(name="1stm", return_symmetry_file=True, mute=True)
     pmm.keep_history(True)
     vis = Visualizer(name="pose", store_scenes=False, store_states=True, representation=["cartoon"], reinitialize=False)
-    sl = CubicSymmetrySlider(pose, symdef, visualizer=vis, trans_mag=1, pymolmover=pmm)
+    sl = CubicSymmetrySlider(pose, symdef, None, visualizer=vis, trans_mag=1, pymolmover=pmm)
 
     # rescue a 5 fold
     for i in range(10):
@@ -176,7 +288,7 @@ def test_apply_local_slide():
     pmm.keep_history(True)
     vis = Visualizer(name="pose", store_scenes=False, store_states=True, representation=["cartoon"], reinitialize=False)
     sf = SymDefSwapper(poseo, symdef, vis)
-    sl = CubicSymmetrySlider(poseo, symdef, visualizer=vis, trans_mag=1)
+    sl = CubicSymmetrySlider(poseo, symdef, None, visualizer=vis, trans_mag=1)
 
     # rescue a 5 fold
     pose5 = poseo.clone()
@@ -232,7 +344,7 @@ def test_apply_local_slide_from_cubicsym():
         pmm.keep_history(True)
         vis = Visualizer(name="pose", store_scenes=False, store_states=True, representation=["cartoon"], reinitialize=False)
         sf = SymDefSwapper(poseo, symdef, vis)
-        sl = CubicSymmetrySlider(poseo, symdef, visualizer=vis, trans_mag=2, pymolmover=pmm)
+        sl = CubicSymmetrySlider(poseo, symdef, None, visualizer=vis, trans_mag=2, pymolmover=pmm)
 
         # rescue a 5 fold
         pose5 = poseo.clone()
@@ -295,7 +407,7 @@ def test_cannot_go_beyound_bounds():
     }
     vis = Visualizer(name="pose", store_scenes=False, store_states=True, representation=["cartoon"], reinitialize=False)
     cb = CubicBoundary(symdef=symdef, pose_at_initial_position=pose, dofspecification=dofspecification)
-    slider = CubicSymmetrySlider(pose, symdef, visualizer=None, trans_mag=2, pymolmover=pmm, cubicboundarymoverfactory=cb, max_slide_attempts=1000)
+    slider = CubicSymmetrySlider(pose, symdef, None, visualizer=None, trans_mag=2, pymolmover=pmm, max_slide_attempts=1000)
     pmm.keep_history(True)
     pose.pdb_info().name("hello")
     pmm.apply(pose)
@@ -326,7 +438,7 @@ def test_apply_on_different_backbones():
     random.seed(661)
     pose_input, pmm, cmd, symdef = setup_test(name=f"1stm", return_symmetry_file=True, mute=True)
     vis = Visualizer(name="pose", store_scenes=False, store_states=True, representation=["cartoon"], reinitialize=False)
-    slider = CubicSymmetrySlider(pose_input, symdef, visualizer=None, trans_mag=2, pymolmover=pmm)
+    slider = CubicSymmetrySlider(pose_input, symdef, None, visualizer=None, trans_mag=2, pymolmover=pmm)
 
     # generate an ensemble
     poses = []

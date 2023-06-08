@@ -18,11 +18,6 @@ from symmetryhandler.reference_kinematics import get_jumpdof_str_str, get_dofs
 from symmetryhandler.mathfunctions import vector_projection, vector_angle
 from cubicsym.actors.symdefswapper import SymDefSwapper
 from io import StringIO
-from pyrosetta.rosetta.core.kinematics import Stub, Jump
-from pyrosetta.rosetta.core.pose.symmetry import sym_dof_jump_num
-from cubicsym.cubicmontecarlo import CubicMonteCarlo
-from cubicsym.cubicdofs import CubicDofs
-from cubicsym.setupaligner import SetupAligner
 
 class SymdefNormalizer:
 
@@ -89,8 +84,8 @@ class SymdefNormalizer:
         pose_norm_symmetrized = pose_unsymmetrized.clone()
         cs.make_symmetric_pose(pose_norm_symmetrized)
         # perturb_jumpdof_str_str(pose_norm_symmetrized, "JUMPHFfold1_z", "angle_z", -angle_z)
-        crystal_rmsd = cs.CA_rmsd_hf_map(pose_norm_symmetrized, pose_crystal)
-        symmetric_rmsd = cs.CA_rmsd_hf_map(pose_norm_symmetrized, pose_symmetrized)
+        crystal_rmsd = cs.rmsd_hf_map(pose_norm_symmetrized, pose_crystal)
+        symmetric_rmsd = cs.rmsd_hf_map(pose_norm_symmetrized, pose_symmetrized)
         print("crystal rmsd from norm", crystal_rmsd, "symmetric_rmsd from norm", symmetric_rmsd)
         assert isclose(crystal_rmsd, 0, abs_tol=1e-3)
         assert isclose(symmetric_rmsd, 0, abs_tol=1e-3)
@@ -165,7 +160,7 @@ class SymdefNormalizer:
     #         if vrt != "SUBUNIT":
     #             cs.get_vrt(vrt).rotate(R_global_z_z)
 
-    def apply(self, pose_in, symdef, final_z_trans:float = None, final_x_trans:float = None):
+    def apply(self, pose_in, symdef, final_z_trans:float = None, final_x_trans:float = None, rotate_x_90_degrees=True):
         """Creates a CubicSetup that is normalized which means that:
         1. The 3-fold vrts z vectors all point into the same point in space (triangle_vector_angle == 0 degrees).
         2. The x translation is along the global x-axis as previously. (But because of 1, the whole structure has to move about the
@@ -204,6 +199,12 @@ class SymdefNormalizer:
             if vrt != "SUBUNIT":
                 cs_hf_norm.get_vrt(vrt).rotate(R_their_z)
                 cs_hf_norm.get_vrt(vrt).rotate(R_global_z_z)
+
+        # # # new
+        # if rotate_x_90_degrees:
+        #     for vrtname in [v.name for v in cs_hf_norm._vrts if "1_x" in v.name and not "ref" in v.name]:
+        #         Rx = rotation_matrix(cs_hf_norm.get_vrt(vrtname)._vrt_x, 90)
+        #         cs_hf_norm.get_vrt(vrtname).rotate(Rx)
         cs_hf_norm.anchor = "COM"
         cs_hf_norm._set_init_vrts() #
         # check if normalized correctly
@@ -212,18 +213,19 @@ class SymdefNormalizer:
         pose = pose_in.clone()
         cs_hf_norm.make_symmetric_pose(pose)
         sds = SymDefSwapper(pose, StringIO(cs_hf_norm.make_symmetry_definition()))
-        cs_3_norm, cs_2_norm = sds.fold3_setup, sds.fold2_setup
+        cs_3_norm, cs_2_norm = sds.fold3F_setup, sds.fold2F_setup
 
         # now we want to straighten the vrts of 3 and 2
         # self.straightinator(cs_3_norm)
         # self.straightinator(cs_2_norm)
 
-        # for norm, base in zip((cs_hf_norm, cs_3_norm, cs_2_norm), ("HF", "31", "21")):
-        #     # apply the default translation if set
-        #     if final_z_trans is not None:
-        #         norm.set_dof(f"JUMP{base}fold1", "z", "translation", final_z_trans)
-        #     if final_x_trans is not None:
-        #         norm.set_dof(f"JUMP{base}fold111", "x", "translation", final_x_trans)
+        for norm, base in zip((cs_hf_norm, cs_3_norm, cs_2_norm), ("HF", "31", "21")):
+            # apply the default translation if set
+            if final_z_trans is not None:
+                norm.set_dof(f"JUMP{base}fold1", "z", "translation", final_z_trans)
+            if final_x_trans is not None:
+                norm.set_dof(f"JUMP{base}fold111", "x", "translation", final_x_trans)
+
         return cs_hf_norm, cs_3_norm, cs_2_norm, hf_rot_angle
 
     # def straightinator(self, cs):

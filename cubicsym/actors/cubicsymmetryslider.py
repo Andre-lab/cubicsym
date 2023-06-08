@@ -10,19 +10,25 @@ from pyrosetta.rosetta.core.pose.symmetry import is_symmetric
 import random
 from cloudcontactscore.cloudcontactscore import CloudContactScore
 from shapedesign.src.utilities.pose import pose_cas_are_identical
-from symmetryhandler.reference_kinematics import perturb_jumpdof_str_int, get_jumpdof_str_int, get_dofs, dof_str_to_int
-from cubicsym.actors.hypotenusemover import HypotenuseMover
+from symmetryhandler.reference_kinematics import perturb_jumpdof_str_int, get_jumpdof_str_int, get_dofs, dof_str_to_int, set_jumpdof_str_int
 from shapedesign.src.utilities.pose import CA_rmsd_without_alignment
 from shapedesign.src.visualization.visualizer import get_visualizer_with_score_attached
 from shapedesign.src.utilities.score import create_sfxn_from_terms
 from cubicsym.actors.symdefswapper import SymDefSwapper
 import math
+from cubicsym.cubicsetup import CubicSetup
+from cubicsym.utilities import get_chain_map, reduce_chain_map_to_indices
+from pyrosetta.rosetta.core.pose.symmetry import sym_dof_jump_num, jump_num_sym_dof
+import numpy as np
+from cloudcontactscore.cloudcontactscorecontainer import CloudContactScoreContainer
+from cubicsym.utilities import copy_pose_id_to_its_bases, add_id_to_pose_w_base
+import warnings
 
 class SymmetrySlider:
     """A symmetric slider using CloudContactScore (CCS)"""
     def __init__(self, pose, acceptable_connections=2, trans_mag=3, max_slide_attempts = 1000,
                  visualizer=None, native=None, freeze_x_at=0, freeze_y_at=0, freeze_z_at=0, css_kwargs=None):
-        self.ccs = CloudContactScore(pose, **css_kwargs) if css_kwargs else CloudContactScore(pose)
+        self.ccs = CloudContactScore(pose, **css_kwargs) if css_kwargs else CloudContactScore(pose, None)
         self.x_params,  self.y_params, self.z_params = None, None, None
         self.store_trans_params(pose) # FIXME: this is not going to work if they are spread over multiple jumps
         self.trans_mag = trans_mag
@@ -149,186 +155,220 @@ class SymmetrySlider:
             data["connections"] = '+'.join([str(k) for k, v in self.hf_clashes.items() if v > 0])
             return data
 
-# FIXME: This should inherit from SymmmetrySlider
+# todo: This should inherit from SymmmetrySlider
 class CubicSymmetrySlider:
     """A slider or cubic symmetries"""
 
-    def __init__(self, pose, symmetry_file, visualizer=None, native=None, trans_mag=0.3, pymolmover=None, max_slide_attempts=100,
-                 cubicboundary=None, set_within_bounds_first=False):
+    def __init__(self, pose, symmetry_file, ccsc: CloudContactScoreContainer, visualizer=None, native=None, trans_mag=0.3, pymolmover=None, max_slide_attempts=100,
+                 cubicboundary=None, set_within_bounds_first=False, debug_mode=False):
         assert is_symmetric(pose)
         self.trans_mag = trans_mag
-        self.store_params(pose)
-        self.fa_rep_score = create_sfxn_from_terms(("fa_rep",), (1.0,))
+        self.ccsc = ccsc
+        # todo: dont use this:
+        #self.fa_rep_score = create_sfxn_from_terms(("fa_rep",), (1.0,))
         self.max_slide_attemps = max_slide_attempts
         self.visualizer = visualizer
-        ####### for Evodock else can delete
-        self.pymolmover = pymolmover
+        self.pymolmover = pymolmover # for Evodock else can delete
         if self.pymolmover:
             self.visualizer = True
-        ####### for Evodock else can delete
         self.native = native
         self.move_x = False
         self.move_z = False
-        self.symdefswapper = SymDefSwapper(pose, symmetry_file)
+        self.sds = SymDefSwapper(pose, symmetry_file, debug_mode=False) # debug_mode)
         self.cubicboundary = cubicboundary
         self.set_within_bounds_first = set_within_bounds_first
-
-    def get_chain_map(self):
-        return self.symdefswapper.get_chain_map()
-
-    def store_params(self, pose):
-        trans_dofs = []
-        for jumpname, jumpparams in get_dofs(pose).items():
-            for dofname in jumpparams.keys():
-                if jumpname == "JUMPHFfold111" and dofname == "x":
-                    self.x_params = (jumpname, dof_str_to_int[dofname])
-                elif jumpname in ("JUMPHFfold1", "JUMP31fold1", "JUMP21fold1") and dofname == "z":
-                    self.zHF_params = (jumpname, dof_str_to_int[dofname])
-                    self.z3_params = ("JUMP31fold1", dof_str_to_int[dofname])
-                    self.z2_params = ("JUMP21fold1", dof_str_to_int[dofname])
-                elif jumpname == "JUMPHFfold1" and dofname == "angle_z":
-                    self.z_rot_params = (jumpname, dof_str_to_int[dofname])
-        return trans_dofs
+        self.cubicsetup = CubicSetup(symmetry_file)
+        self.debug_mode = debug_mode
+        self.hf_hit = None
+        self.f3_hit = None
+        self.f2_hit = None
+        self.hf_slide_moves = None
+        self.f3_slide_moves = None
+        self.f2_slide_moves = None
 
     def visualize(self, pose):
+        """Visualize the pose."""
         if self.visualizer:
             if self.pymolmover:
                 self.pymolmover.apply(pose)
             else:
                 self.visualizer.send_pose(pose)
 
-    def local_trial_move(self, pose, f, slide_dir, max_slide_attempts, trans_mag):
+    def n_clashes(self, pose):
+        return self.ccsc.ccs.number_of_clashes(pose)
+
+    # TODO: within bounds can be used here but there needs to be an equivalent version for 2-fold, 3-fold and 4-fold
+    def slide_trial(self, pose, slide_dir, max_slide_attempts, trans_mag) -> (bool, int):
+        """Slides the pose along its fold towards the center. Returns a tuple of of size 2:
+            index 0 = False if the folds never hit each other, True otherwise.
+            index 1 = The number of slide_moves used."""
+        self.ccsc.set_ccs_and_cmc(pose)
         moved = False
-        init_score = self.fa_rep_score(pose)
-        slide_move = 0
-        # TODO: within bounds can be used here but there needs to be an equivalent version for 2-fold, 3-fold and 4-fold
-        while self.fa_rep_score(pose) <= init_score: # and self.is_within_bounds(pose):
-            f(pose, slide_dir, trans_mag)
+        init_n_clashes = self.n_clashes(pose)
+        slide_moves = 0
+        foldid = CubicSetup.get_jumpidentifier_from_pose(pose)
+        self.visualize(pose)
+        while self.n_clashes(pose) == init_n_clashes or self.is_z_below_0(pose, foldid) or self.is_x_below_0(pose, foldid):
             moved = True
+            self.slide_z(pose, slide_dir, trans_mag, foldid)
             self.visualize(pose)
-            slide_move += 1
-            if slide_move >= max_slide_attempts:
-                f(pose, slide_dir * -1 * slide_move, trans_mag)  # go back to the previous location
-                return
+            slide_moves += 1
+            if slide_moves >= max_slide_attempts:
+                self.slide_z(pose, slide_dir * -1 * slide_moves, trans_mag, foldid) # go back to the previous location when the function was called
+                return False, slide_moves
         if moved:
-            f(pose, slide_dir * -1, trans_mag) # go back to the previous location
+            self.slide_z(pose, slide_dir * -1, trans_mag, foldid)  # go back to the previous location, just before the pose was moved the last time
             self.visualize(pose)
+        return True, slide_moves
 
-    def slide_HFfold(self, poseHF, slide_dir, trans_mag):
-        perturb_jumpdof_str_int(poseHF, *self.zHF_params, value =slide_dir * trans_mag)
+    def slide_z(self, pose, slide_dir, trans_mag, foldid):
+        """Slide in the z direction."""
+        perturb_jumpdof_str_int(pose, f"JUMP{foldid}fold1", 3, value=slide_dir * trans_mag)
 
-    def slide_3fold(self, pose3, slide_dir, trans_mag):
-        perturb_jumpdof_str_int(pose3, *self.z3_params, value = slide_dir * trans_mag)
+    def slide_x(self, pose, slide_dir, trans_mag, foldid):
+        """Slide in the x direction."""
+        perturb_jumpdof_str_int(pose, f"JUMP{foldid}fold111", 1, value=slide_dir * trans_mag)
 
-    def slide_2fold(self, pose2, slide_dir, trans_mag):
-        perturb_jumpdof_str_int(pose2, *self.z2_params, value = slide_dir * trans_mag)
-
-    def get_max_dif(self, pose5, pose3, pose2):
-        s = (self.fa_rep_score.score(pose5),
-             self.fa_rep_score.score(pose3),
-             self.fa_rep_score.score(pose2),
-             )
-        return max(s) - min(s)
-
-    def apply(self, poseHF, score_buffer=2, debug=False, atol=1):
-        """Applies local sliding"""
-        if self.set_within_bounds_first:
-            self.cubicboundary.put_inside_bounds(poseHF, randomize=True)
-        pose_org = poseHF.clone()
-        # print(f"DEBUG IS {debug}")
-        pose3 = self.symdefswapper.create_3fold_pose_from_HFfold(poseHF)
-        pose2 = self.symdefswapper.create_2fold_pose_from_HFfold(poseHF)
-        if debug:
-            try:
-                assert pose_cas_are_identical(poseHF, pose3, pose2, map_chains=self.get_chain_map(), atol=atol)
-            except AssertionError:
-                raise AssertionError
-            poseHF.pdb_info().name("poseHF")
-            pose3.pdb_info().name("pose3")
-            pose2.pdb_info().name("pose2")
-        if debug:
+    def __debug_apply(self, *poses, atol=0.5):
+        """Debugs apply"""
+        chain_map = get_chain_map(self.cubicsetup.cubic_symmetry(), self.cubicsetup.righthanded)
+        chain_map = reduce_chain_map_to_indices(chain_map, *poses)
+        try:
+            assert pose_cas_are_identical(*poses, map_chains=chain_map, atol=atol)
+        except AssertionError:
             if self.pymolmover:
-                # self.pymolmover.keep_history(True)
-                self.pymolmover.apply(poseHF)
-                self.pymolmover.apply(pose3)
-                self.pymolmover.apply(pose2)
-        # todo: randomize the order and base choice on the interface energies
-        self.local_trial_move(poseHF, self.slide_HFfold, -1, self.max_slide_attemps, self.trans_mag)
-        self.symdefswapper.transfer_HFto3(poseHF, pose3)
-        if debug:
-            try:
-                assert pose_cas_are_identical(poseHF, pose3, map_chains=[(i[0], i[1]) for i in self.get_chain_map()], atol=atol)
-            except AssertionError:
-                raise AssertionError
-        self.local_trial_move(pose3, self.slide_3fold, -1, self.max_slide_attemps, self.trans_mag)
-        self.symdefswapper.transfer_3to2(pose3, pose2)
-        if debug:
-            assert pose_cas_are_identical(pose3, pose2, map_chains=[(i[1], i[2]) for i in self.get_chain_map()], atol=atol)
-        self.local_trial_move(pose2, self.slide_2fold, -1, self.max_slide_attemps, self.trans_mag)
-        self.symdefswapper.transfer_2toHF(pose2, poseHF)
-        if debug:
-            assert pose_cas_are_identical(pose2, poseHF, map_chains=[(i[2], i[0]) for i in self.get_chain_map()], atol=atol)
-        # todo: when implementing is during local_trial_slide this is not needed anymore
-        if self.cubicboundary and not self.cubicboundary.all_dofs_within_bounds(poseHF):
-            poseHF.assign(pose_org)
+                for pose in poses:
+                    pose.pdb_info().name(f"pose_{CubicSetup.get_base_from_pose(pose)}")
+                    self.pymolmover.apply(pose)
+            raise AssertionError
 
-class CubicGlobalSymmetrySlider(CubicSymmetrySlider):
+        if self.pymolmover:
+            for pose in poses:
+                pose.pdb_info().name(f"pose_{CubicSetup.get_base_from_pose(pose)}")
+                self.pymolmover.apply(pose)
 
-    def __init__(self, pose, symmetry_file, visualizer=None, pymolmover=None, normalize_trans=(2000, 1000), slide_x_away=False):
-        super().__init__(pose, symmetry_file, visualizer, pymolmover=pymolmover)
-        self.normalize_trans = normalize_trans
-        self.slide_x_away = slide_x_away
+    def is_z_below_0(self, pose, foldid):
+        """Checks if z is below zero"""
+        return get_jumpdof_str_int(pose, f"JUMP{foldid}fold1", 3) < 0
 
-    def slide_away(self, pose):
-        fa_rep_null = self.get_null_fa_rep(pose)
-        current_score = self.fa_rep_score(pose)
-        # slide away until the energy is as if no chain are touching eachother
-        while current_score > fa_rep_null or not math.isclose(current_score, fa_rep_null, abs_tol=1e-1):
-            self.slide_HFfold(pose, 1, 10)
-            if self.slide_x_away:
-                self.slide_x(pose, 1, 5)
+    def is_x_below_0(self, pose, foldid):
+        """Checks if z is below zero"""
+        return get_jumpdof_str_int(pose, f"JUMP{foldid}fold111", 1) < 0
+
+    def set_above_z_0(self, pose):
+        """If the z translation is below 0 this will set it to +5"""
+        fold_id = CubicSetup.get_jumpidentifier_from_pose(pose)
+        if get_jumpdof_str_int(pose, f"JUMP{fold_id}fold1", 3) < 0:
+            set_jumpdof_str_int(pose, f"JUMP{fold_id}fold1", 3, 5)
+
+    # fixme: also remember to save the id, or have an id flag
+    def apply(self, pose_X, score_buffer=2, atol=1):
+        """Applies local sliding"""
+
+        # Set inside bounds if it is not
+        if self.set_within_bounds_first:
+            self.cubicboundary.put_inside_bounds(pose_X, randomize=True)
+
+        # if z is below 0, we need to put it above it
+        self.set_above_z_0(pose_X)
+
+        # if for some reason (could potentially happen if the different folds/subunits dont hit eachother)
+        # this slider puts the structure into bounce again by assigning the original pose to the input pose (pose_X),
+        # therefor we save the original structure here.
+        pose_X_org = pose_X.clone()
+
+        # create the other folds based on pose_X and then transfer the id of pose_X to them
+        pose_HF, pose_3F, pose_2F = self.sds.create_remaing_folds(pose_X)
+        copy_pose_id_to_its_bases(pose_X, pose_HF, pose_3F, pose_2F)
+
+        if self.debug_mode:
+            self.__debug_apply(pose_HF, pose_3F, pose_2F)
+
+        # Slide the HF fold
+        self.hf_hit, self.hf_slide_moves = self.slide_trial(pose_HF, -1, self.max_slide_attemps, self.trans_mag)
+        self.sds.transfer_poseA2B(pose_HF, pose_3F)
+
+        if self.debug_mode:
+            self.__debug_apply(pose_HF, pose_3F)
+            self.ccsc.ccs.pose_atoms_and_cloud_atoms_overlap(pose_HF)
+
+        # Slide the 3F fold
+        self.f3_hit, self.f3_slide_moves = self.slide_trial(pose_3F, -1, self.max_slide_attemps, self.trans_mag)
+        self.sds.transfer_poseA2B(pose_3F, pose_2F)
+
+        if self.debug_mode:
+            self.__debug_apply(pose_3F, pose_2F)
+            self.ccsc.ccs.pose_atoms_and_cloud_atoms_overlap(pose_3F)
+
+        # Slide the 2F fold
+        self.f2_hit, self.f2_slide_moves = self.slide_trial(pose_2F, -1, self.max_slide_attemps, self.trans_mag)
+        self.sds.transfer_poseA2B(pose_2F, pose_HF)
+
+        if self.debug_mode:
+            self.__debug_apply(pose_2F, pose_HF)
+
+        # create pose_X again (unnecessary if the pose is already HF):
+        if not self.cubicsetup.is_hf_based():
+            self.sds.transfer_poseA2B(pose_HF, pose_X)
+        else:
+            assert pose_HF is pose_X, "pose_HF and pose_X should reference the same object"
+
+        if not self.cubicboundary.all_dofs_within_bounds(pose_X):
+            pose_X.assign(pose_X_org)
+
+    def get_last_hit_status(self):
+        return {"HF": {"hit": self.hf_hit, "moves": self.hf_slide_moves},
+                "3F": {"hit": self.f3_hit, "moves": self.f3_slide_moves},
+                "2F": {"hit": self.f2_hit, "moves": self.f2_slide_moves}}
+
+
+class InitCubicSymmetrySlider(CubicSymmetrySlider):
+    """Initial Cubic symmetrical slider. Slides away until no contacts are felt between the individual folds, and thereafter slides onto
+    until clashes are felt between the folds"""
+
+    def __init__(self, pose, symmetry_file, ccsc: CloudContactScoreContainer, visualizer=None, pymolmover=None):
+        """Initialize a InitCubicSymmetrySlider object."""
+        super().__init__(pose, symmetry_file, ccsc, visualizer, pymolmover=pymolmover)
+
+    def slide_away(self, pose, foldid):
+        """Slide away until no clashes are felt between either of the folds"""
+        # slide away until the energy is as if no fold are touching each other
+        no_fold_clashes = self.get_clashes_when_sliding_folds_away(pose, foldid)
+        slide_attempt = 1
+        while self.ccsc.ccs.number_of_clashes(pose) > no_fold_clashes and not slide_attempt == self.max_slide_attemps:
+            self.slide_z(pose, slide_dir=1, trans_mag=10, foldid=foldid)
             self.visualize(pose)
-            current_score = self.fa_rep_score(pose)
+            slide_attempt += 1
+        return slide_attempt == self.max_slide_attemps
 
-    def slide_onto(self, pose):
-        # first move x
-        moved = False
-        init_score = self.fa_rep_score(pose)
-        while self.fa_rep_score(pose) <= init_score:
-            self.slide_x(pose, -1, 0.3)
+    def slide_onto(self, pose, foldid):
+        """Slide onto until clashes are felt between either of the folds"""
+        current_clashes = self.ccsc.ccs.number_of_clashes(pose)
+        slide_attempt = 1
+        while self.ccsc.ccs.number_of_clashes(pose) == current_clashes and not slide_attempt == self.max_slide_attemps:
+            self.slide_z(pose, slide_dir=-1, trans_mag=self.trans_mag, foldid=foldid)
             self.visualize(pose)
-            moved = True
-        if moved:
-            self.slide_x(pose, 1, 0.3)
-            self.visualize(pose)
-        # then move HF
-        moved = False
-        init_score = self.fa_rep_score(pose)
-        while self.fa_rep_score(pose) <= init_score:
-            self.slide_HFfold(pose, -1, 0.3)
-            self.visualize(pose)
-            moved = True
-        if moved:
-            self.slide_HFfold(pose, 1, 0.3)
-            self.visualize(pose)
+            slide_attempt += 1
+        return slide_attempt == self.max_slide_attemps
 
-    def get_null_fa_rep(self, pose):
-        """Get the energy of the pose when all chains dont touch each other."""
-        self.slide_HFfold(pose, 1, trans_mag=self.normalize_trans[0])
-        if self.slide_x_away:
-            self.slide_x(pose, 1, trans_mag=self.normalize_trans[1])
-        self.visualize(pose)
-        fa_rep_null = self.fa_rep_score.score(pose)
-        self.slide_HFfold(pose, -1, trans_mag=self.normalize_trans[0])
-        self.visualize(pose)
-        if self.slide_x_away:
-            self.slide_x(pose, -1, trans_mag=self.normalize_trans[1])
-        self.visualize(pose)
-        return fa_rep_null
-
-    def slide_x(self, pose, slide_dir, trans_mag):
-        perturb_jumpdof_str_int(pose, *self.x_params, value = slide_dir * trans_mag)
+    def get_clashes_when_sliding_folds_away(self, pose, foldid):
+        self.slide_z(pose, slide_dir=1, trans_mag=2000, foldid=foldid)
+        clashes = self.ccsc.ccs.number_of_clashes(pose)
+        self.slide_z(pose, slide_dir=-1, trans_mag=2000, foldid=foldid)
+        return clashes
 
     def apply(self, pose):
-        self.slide_away(pose)
-        self.slide_onto(pose)
+        """Apply initial sliding."""
+        pose_before = pose.clone()
+        foldid = CubicSetup.get_jumpidentifier_from_pose(pose)
+        self.ccsc.set_ccs_and_cmc(pose)
+        max_slides_away_hit = self.slide_away(pose, foldid)
+        if max_slides_away_hit:
+            warnings.warn(f"Max slide away attempts hit {max_slides_away_hit}. You might want to increase the max_slide_attempts" 
+                          f" or change the bounds.")
+        max_slides_onto_hit = self.slide_onto(pose, foldid)
+        if max_slides_onto_hit:
+            warnings.warn(f"Max slide onto attempts hit {max_slides_onto_hit}. You might want to increase the max_slide_attempts"
+                          f" or change the bounds. The pose will be reverted to the dofs before the slide was applied.")
+            pose.assign(pose_before)
+        return max_slides_onto_hit

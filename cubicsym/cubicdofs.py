@@ -6,7 +6,7 @@ CubicDofs class.
 @Date: 9/26/22
 """
 from pyrosetta.rosetta.core.pose.symmetry import sym_dof_jump_num, jump_num_sym_dof
-from symmetryhandler.kinematics import dof_int_to_str, dof_str_to_int, get_jumpdof_int_int, get_jumpdof_str_str, set_jumpdof_int_int
+from symmetryhandler.reference_kinematics import dof_int_to_str, dof_str_to_int, get_jumpdof_int_int, get_jumpdof_str_str, set_jumpdof_int_int
 import numpy as np
 
 class CubicDofs:

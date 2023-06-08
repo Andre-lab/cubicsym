@@ -9,7 +9,7 @@ from pyrosetta import Pose
 from pyrosetta.rosetta.core.scoring import CA_rmsd
 from cubicsym.cubicsetup import CubicSetup
 from cubicsym.cubicmontecarlo import CubicMonteCarlo
-from cubicsym.cubicdofs import CubicDofs
+from cubicsym.dofspec import DofSpec
 from pyrosetta.rosetta.protocols.rigid import RigidBodyDofAdaptiveMover
 from pyrosetta import Pose
 from copy import deepcopy
@@ -32,7 +32,7 @@ class RMSDscore:
 
     def score(self, pose):
         if self.map_to_hf:
-            return self.cs.CA_rmsd_hf_map(pose, self.reference, same_handedness=self.same_handedness) * self.multiplier
+            return self.cs.rmsd_hf_map(pose, self.reference, same_handedness=self.same_handedness) * self.multiplier
         else:
             return CA_rmsd(pose, self.reference) * self.multiplier
 
@@ -167,7 +167,7 @@ class SetupAligner:
                                  *self.get_extra_options(dof_params))
         self.rmsd_score = RMSDscore(self.al_from, self.pose_to, map_to_hf=self.use_hf_chain_mapping,
                                     same_handedness=self.same_handedness)
-        cmc = CubicMonteCarlo(self.rmsd_score, CubicDofs(self.pose_from, dofs))
+        cmc = CubicMonteCarlo(self.rmsd_score, DofSpec(self.pose_from, dofs))
         cmc.reset(self.pose_from)
         print("init", cmc.lowest_score)
 
@@ -250,7 +250,7 @@ class SetupAligner:
                                  {"angle_x": "x_angle", "angle_y": "y_angle", "angle_z": "z_angle", "x": "x", "y": "y", "z": "z"}[dof_name],
                                  *self.get_extra_options(dof_params))
         self.rmsd_score = RMSDscore(self.al_from, self.pose_to, map_to_hf=self.use_hf_chain_mapping, same_handedness=self.same_handedness)
-        cmc = CubicMonteCarlo(self.rmsd_score, CubicDofs(self.pose_from, dofs))
+        cmc = CubicMonteCarlo(self.rmsd_score, DofSpec(self.pose_from, dofs))
         cmc.reset(self.pose_from)
         print("init", cmc.lowest_score)
 
@@ -333,7 +333,7 @@ class SetupAligner:
                                  {"angle_x": "x_angle", "angle_y": "y_angle", "angle_z": "z_angle", "x": "x", "y": "y", "z": "z"}[dof_name],
                                  *self.get_extra_options(dof_params))
         self.rmsd_score = RMSDscore(self.al_from, self.pose_to, map_to_hf=self.use_hf_chain_mapping, same_handedness=self.same_handedness)
-        cmc = CubicMonteCarlo(self.rmsd_score, CubicDofs(self.pose_from, dofs))
+        cmc = CubicMonteCarlo(self.rmsd_score, DofSpec(self.pose_from, dofs))
         cmc.reset(self.pose_from)
         print("init", cmc.lowest_score)
 

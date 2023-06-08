@@ -6,7 +6,165 @@ Test for the CubicSetup class
 @Date: 9/21/22
 """
 import pytest
+from symmetryhandler.reference_kinematics import perturb_jumpdof_str_str
 import importlib
+
+# def test_read_from_pose():
+#     from simpletestlib.test import setup_test
+#     from cubicsym.kinematics import randomize_all_dofs
+#     from cubicsym.cubicsetup import CubicSetup
+#     # first we need to write down the jumpgroups, energies, anchor type, reset
+#     sym_files = {"I": ["1STM", "1B5S", "1NQW", "6S44", "5CVZ"], # hands: {'1STM': True, '1B5S': True, '1NQW': False, '6S44': False, '5CVZ': True}
+#                  "O": ["5GU1", "3R2R", "1BG7", "1AEW", "1P3Y"], # hands: {'5GU1': True, '3R2R': True, '1BG7': True, '1AEW': True, '1P3Y': False}
+#                  "T": ["1MOG", "1H0S", "7JRH", "4KIJ", "2VTY"]} # hands: {'1MOG': False, '1H0S': True, '7JRH': True, '4KIJ': True, '2VTY': False}
+#     for pdb in ("7Q03", "1H0S"):
+#         pose, pmm, cmd, symdef = setup_test(name="T", file=pdb, return_symmetry_file=True, mute=True)
+#         cs = CubicSetup(pose=pose)
+#         for i in range(10):
+#             randomize_all_dofs(pose)
+#             cs.vrts_overlap_with_pose(pose, update_and_apply_dofs=True)
+def cut_monomeric_pose(pose, n_resi, c_resi):
+    """Cut a pose with a single chain"""
+    # this cuts including the first and last index
+    if c_resi > 0:
+        pose.delete_residue_range_slow(pose.size() - c_resi + 1, pose.size())
+    if n_resi > 0:  # else keep the N termini
+        pose.delete_residue_range_slow(1, n_resi)
+    return pose
+
+def test_rmsd_7q03():
+    from simpletestlib.test import setup_test
+    from cubicsym.cubicsetup import CubicSetup
+    from pyrosetta import pose_from_file
+    from cubicsym.paths import SYMMETRICAL
+    sym, pdbid, fold = "T", "7Q03", "2F"
+    native, pmm, cmd = setup_test(name=sym, file=pdbid, mute=True, symmetrize=True, reinitialize=False)
+    norm_cs = CubicSetup()
+    norm_cs.load_norm_symdef(sym, fold=fold)
+    f = "/home/mads/production/evodock/results/globalfrommultimer_rest/7Q03/relax_final/out"
+    pose = pose_from_file(f"{f}/input_input_relaxed_model_1_multimer_v2_pred_17_A_2_multi_up.prepack36_63_35.pdb")
+    symdef = f"{f}/input_relaxed_model_1_multimer_v2_pred_17_A_2_multi_up.prepack36_63_35.symm"
+    cs = CubicSetup(symdef)
+    same_handedness = norm_cs.righthanded == cs.righthanded
+    cs.make_symmetric_pose(pose)
+    pose_temp = pose.clone()
+    # pymol
+    # angle, rots = cs.get_register_shift_angle()
+    # jump = f"JUMP{cs.get_jumpidentifier()}fold1_z"
+    # for n in range(1, rots):
+    #     perturb_jumpdof_str_str(pose_temp, jump, "angle_z", angle)
+    pmm.apply(pose_temp)
+    native.pdb_info().name("native")
+    pmm.apply(native)
+    # special map
+    []
+
+    # pymol
+    native_crystallic = pose_from_file(str(SYMMETRICAL.joinpath(f"{sym}/idealized/crystal_repr/native/{pdbid}_crystal.pdb")))
+    rmsd = norm_cs.rmsd_hf_map(pose, native_crystallic, same_handedness, interface=False)
+    rmsd_other_map = norm_cs.rmsd_hf_map(pose, native_crystallic, same_handedness, interface=False, use_map = (4, 7, 1, 2, None, 3, None))
+    print("IS", rmsd, rmsd_other_map)
+
+def test_rmsd():
+    from simpletestlib.test import setup_test
+    from cubicsym.cubicsetup import CubicSetup
+    from cubicsym.actors.symdefswapper import SymDefSwapper
+    from symmetryhandler.reference_kinematics import set_jumpdof_str_str
+    from pyrosetta import pose_from_file
+    from cubicsym.paths import SYMMETRICAL
+    import pandas as pd
+    from random import randint
+    selection = { "T": {
+        "2CC9": "HF",
+        "7Q03": "2F",
+        "4DCL": "HF",
+        "3LEO": "HF",
+        "2QQY": "2F",
+        "6M8V": "2F",
+        "6HSB": "HF",
+    }, "O": {
+        "3WIS": "3F",
+        "5H46": "2F",
+        "5EKW": "3F",
+        "3N1I": "HF",
+        "6H05": "3F",
+        "7O63": "2F",
+        "7OHF": "2F",
+    }, "I": {
+        "1HQK": "HF",
+        "1T0T": "HF",
+        "1X36": "HF",
+        "7B3Y": "3F",
+        "4V4M": "HF",
+        "1JH5": "3F",
+        "6ZLO": "3F"
+    }}
+    visualize = False
+    df = pd.read_csv("/home/mads/projects/cubicsym/tests/outputs/normalization_info_benchmark.csv")
+    for sym, files in selection.items():
+        for pdbid, fold in files.items():
+            native, pmm, cmd, symdef = setup_test(name=sym, file=pdbid, mute=True, symmetrize=False, return_symmetry_file=True, reinitialize=False)
+            n = randint(3, 10)
+            c = randint(3, 10)
+            cs = CubicSetup(symdef)
+            norm_cs = CubicSetup()
+            norm_cs.load_norm_symdef(sym, fold=fold)
+            same_handedness = norm_cs.righthanded == cs.righthanded
+            pose = native.clone()
+            # lets try to cut pose
+            cut_monomeric_pose(pose, n, c)
+            cs.make_symmetric_pose(native)
+            norm_cs.make_symmetric_pose(pose)
+            for jump, dof, val in df[df["pdb_base"] == f"{pdbid}_{fold}"][["jump", "dof", "val"]].values:
+                set_jumpdof_str_str(pose, jump, dof, val)
+            rmsd_in_df = df[df["pdb_base"] == f"{pdbid}_{fold}"]["rmsd"].values[0]
+            native_crystallic = pose_from_file(str(SYMMETRICAL.joinpath(f"{sym}/idealized/crystal_repr/native/{pdbid}_crystal.pdb")))
+            rmsd = norm_cs.rmsd_hf_map(pose, native_crystallic, same_handedness, interface=False)
+            rmsd_interface = norm_cs.rmsd_hf_map(pose, native_crystallic, same_handedness, interface=True)
+            try:
+                if visualize:
+                    pose.pdb_info().name(f"pose_{pdbid}")
+                    native.pdb_info().name(f"native_{pdbid}")
+                    pmm.apply(pose)
+                    pmm.apply(native)
+                    mapp = norm_cs.construct_residue_map_any2hf(pose, native_crystallic, same_handedness=same_handedness, interface=True)
+                    mapp = {k:v for k, v in mapp.items()}
+                    resis = [pose.pdb_info().pose2pdb(i).split() for i in mapp.keys()]
+                    resis_ref = [native_crystallic.pdb_info().pose2pdb(i).split() for i in mapp.values()]
+                    cmd.do(f"color red, pose_{pdbid} AND ( {' OR '.join([f'(resi {ri} AND chain {ch})' for ri, ch in resis])} )")
+                    cmd.do(f"color red, native_{pdbid} AND ( {' OR '.join([f'(resi {ri} AND chain {ch})' for ri, ch in resis_ref])} )")
+                assert rmsd_interface <= rmsd_in_df + 0.3
+                assert rmsd <= rmsd_in_df + 0.3
+            except AssertionError:
+                pose.pdb_info().name("pose")
+                native.pdb_info().name("native")
+                pmm.apply(pose)
+                pmm.apply(native)
+                norm_cs.construct_residue_map_any2hf(pose, native_crystallic, same_handedness=same_handedness, interface=True)
+                raise AssertionError
+
+
+
+def test_calculate_if_righthanded_from_pose():
+    from simpletestlib.test import setup_test
+    from cubicsym.cubicsetup import CubicSetup
+    from cubicsym.actors.symdefswapper import SymDefSwapper
+    hands = {'1STM': True, '1B5S': True, '1NQW': False, '6S44': False, '5CVZ': True,
+        '5GU1': True, '3R2R': True, '1BG7': True, '1AEW': True, '1P3Y': False,
+        '1MOG': False, '1H0S': True, '7JRH': True, '4KIJ': True, '2VTY': False}
+    sym_files = {"I": ["1STM", "1B5S", "1NQW", "6S44", "5CVZ"],
+                 "O": ["5GU1", "3R2R", "1BG7", "1AEW", "1P3Y"],
+                 "T": ["1MOG", "1H0S", "7JRH", "4KIJ", "2VTY"]}
+    for sym, files in sym_files.items():
+        for file in files:
+            pose_HF, pmm, cmd, symdef = setup_test(name=sym, file=file, mute=True, return_symmetry_file=True, reinitialize=False)
+            sds = SymDefSwapper(pose_HF, symdef)
+            pose_3F, pose_2F = sds.create_3fold_pose_from_HFfold(pose_HF), sds.create_2fold_pose_from_HFfold(pose_HF)
+            for pose, fold, in zip((pose_3F, pose_2F, pose_HF), ("3", "2", "HF")):
+                assert hands[file] == CubicSetup.calculate_if_righthanded_from_pose(pose), f"{file} is {hands[file]}"
+                print(file, fold, "OK!")
+            #setup.visualize(ip="10.8.0.6", suffix=f"{file}")
+
 
 def test_show_multiple_symmetries():
     from simpletestlib.test import setup_test
@@ -20,7 +178,7 @@ def test_show_multiple_symmetries():
             pmm.keep_history(True)
             pose.pdb_info().name("org")
             pmm.apply(pose)
-            setup = CubicSetup(file=symdef)
+            setup = CubicSetup(symdef=symdef)
             setup.visualize(ip="10.8.0.6", suffix=f"{file}")
 
 def test_handedness():
@@ -52,7 +210,7 @@ def test_get_chains():
             pmm.keep_history(True)
             pose.pdb_info().name("org")
             pmm.apply(pose)
-            setup = CubicSetup(file=symdef)
+            setup = CubicSetup(symdef=symdef)
             pose.pdb_info().name("hf")
             pmm.apply(setup.get_HF_chains(pose))
             pose.pdb_info().name("3")
@@ -106,7 +264,7 @@ def test_get_chain_names():
         for file in files:
             pose, pmm, cmd, symdef = setup_test(name=sym, file=file, mute=True, return_symmetry_file=True)
             pmm.apply(pose)
-            setup = CubicSetup(file=symdef)
+            setup = CubicSetup(symdef=symdef)
             results[sym][file]["HF"] = setup.get_HF_chain_ids()
             results[sym][file]["3"] = setup.get_3fold_chain_ids()
             results[sym][file]["2"] = setup.get_2fold_chain_ids()

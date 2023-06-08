@@ -24,7 +24,7 @@ class BoundedMinMover:
         movemap = MoveMap()
         movemap.set_chi(False)
         movemap.set_bb(False)
-        for jumpid in self.cubicboundary.cubicdofs.get_jumps_only_as_int():
+        for jumpid in self.cubicboundary.dof_spec.get_jumps_only_as_int():
             movemap.set_jump(jumpid, True)
         return movemap
 

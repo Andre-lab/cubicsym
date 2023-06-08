@@ -77,21 +77,7 @@ class CubicSymmetricAssembly(Assembly):
                 self.find_symmetry(mmcif_file, mmcif_symmetry)
 
     @classmethod
-    def from_rosetta_input(cls, input_file, symdef_file=None):
-        """Initialize an instance from a Rosetta input file and optionally a symdef file. If no symdef file is given,
-        assume that the symdef information is stored in a SYMMETRY line in the input file."""
-        # create and symmetrize a pose.
-        # TODO: The only reason for this is that we want the master subunit in its correct position. We could also
-        #  use setup._dofs to do that if we want the code to be pyrosetta free and shorter code.
-        init("-initialize_rigid_body_dofs true -pdb_comments")
-        pose = pose_from_file(input_file)
-        setup = SymmetrySetup()
-        n_chains = pose.num_chains()
-        if not symdef_file:
-            setup.read_from_pose(pose)
-        else:
-            setup.read_from_file(symdef_file)
-        setup.make_symmetric_pose(pose)
+    def helle(cls, pose, input_file, setup, n_chains):
         new_pose = Pose()
         extract_asymmetric_unit(pose, new_pose, False)
         # create a Model from the symmetrized pose master subunit
@@ -115,14 +101,46 @@ class CubicSymmetricAssembly(Assembly):
         master = Model(f"{next(count)}")
         for n, chain in enumerate(structure.get_chains()):
             if n >= n_chains:
-               break
+                break
             chain.id = next(chain_ids) # should be the same but we need to use them up anyways
             master.add(chain)
         cass.add(master)
+        return cass, hf, angle, master, count, chain_ids
+
+    @classmethod
+    def from_rosetta_input(cls, input_file, symdef_file=None):
+        """Initialize an instance from a Rosetta input file and optionally a symdef file. If no symdef file is given,
+        assume that the symdef information is stored in a SYMMETRY line in the input file."""
+        # create and symmetrize a pose.
+        # TODO: The only reason for this is that we want the master subunit in its correct position. We could also
+        #  use setup._dofs to do that if we want the code to be pyrosetta free and shorter code.
+        init("-initialize_rigid_body_dofs true -pdb_comments")
+        pose = pose_from_file(input_file)
+        setup = CubicSetup()
+        n_chains = pose.num_chains()
+        if not symdef_file:
+            setup.read_from_pose_comment(pose)
+        else:
+            setup.read_from_file(symdef_file)
+        setup.make_symmetric_pose(pose)
         # from the setup construct the vectors that point to the high-fold centers
+        # fixme: if not HF-based you can get it from other axis combined - do that!
+        if not setup.is_hf_based():
+            from cubicsym.actors.symdefswapper import SymDefSwapper
+            sds = SymDefSwapper(pose, setup)
+            setup = sds.foldHF_setup
+            pose = sds.create_hffold_pose(pose)
+        cass, hf, angle, master, count, chain_ids = cls.helle(pose, input_file, setup, n_chains)
         z1high = -setup.get_vrt("VRTHFfold")._vrt_z
         z2high = -setup.get_vrt("VRT2fold")._vrt_z
         z3high = -setup.get_vrt("VRT3fold")._vrt_z
+        #     z1high = -setup.get_vrt("VRT31fold")._vrt_z
+        #     z2high = -setup.get_vrt("VRT32fold")._vrt_z
+        #     z3high = -setup.get_vrt("VRT3fold")._vrt_z
+        # elif setup.is_3f_based():
+        #     z1high = -setup.get_vrt("VRT21fold")._vrt_z
+        #     z2high = -setup.get_vrt("VRT32fold")._vrt_z
+        #     z3high = -setup.get_vrt("VRT3fold")._vrt_z
         # 1. Make high fold around master
         for i in range(1, hf):
             new_subunit = Model(f"{next(count)}")
@@ -926,7 +944,12 @@ class CubicSymmetricAssembly(Assembly):
                 else:
                     setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, origo))
                 setup.add_jump(jump + suffix, name + suffixp, name + suffix)
-            setup.add_jump(jump + f"{sj}1" + "_subunit", name + suffix, "SUBUNIT")
+            # add an sds jump and and vrt just before the SUBUNIT
+            sds_name = name + f"{sj}1" + "_sds"
+            setup.add_vrt(CoordinateFrame(sds_name, x, y, z, origo))  # gets the last
+            setup.add_jump(jump + f"{sj}1" + "_sds", name + suffix, sds_name)
+            # add jump
+            setup.add_jump(jump + f"{sj}1" + "_subunit", sds_name, "SUBUNIT")
         # ---------------------
 
         closest_2fold_id, furthest_2fold_id = self.get_closest_and_furthest_2_fold(master_id, master_2_folds)
@@ -1006,7 +1029,12 @@ class CubicSymmetricAssembly(Assembly):
                 else:
                     setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, origo))
                 setup.add_jump(jump + suffix, name + suffixp, name + suffix)
-            setup.add_jump(jump + f"{sj}1" + "_subunit", name + suffix, "SUBUNIT")
+            # add an sds jump and and vrt just before the SUBUNIT
+            sds_name = name + f"{sj}1" + "_sds"
+            setup.add_vrt(CoordinateFrame(sds_name, x, y, z, origo))  # gets the last
+            setup.add_jump(jump + f"{sj}1" + "_sds", name + suffix, sds_name)
+            # add the subunit jump
+            setup.add_jump(jump + f"{sj}1" + "_subunit", sds_name, "SUBUNIT")
         # ------------------------------
 
         # ---- Main 2-fold's 5-fold ----
@@ -1058,7 +1086,12 @@ class CubicSymmetricAssembly(Assembly):
                 else:
                     setup.add_vrt(CoordinateFrame(name + suffix, x, y, z, origo))
                 setup.add_jump(jump + suffix, name + suffixp, name + suffix)
-            setup.add_jump(jump +  f"{sj}1" + "_subunit", name + suffix, "SUBUNIT")
+            # add an sds jump and and vrt just before the SUBUNIT
+            sds_name = name + f"{sj}1" + "_sds"
+            setup.add_vrt(CoordinateFrame(sds_name, x, y, z, origo)) # gets the last
+            setup.add_jump(jump +  f"{sj}1" + "_sds", name + suffix, sds_name)
+            # add the subunit jump
+            setup.add_jump(jump +  f"{sj}1" + "_subunit", sds_name, "SUBUNIT")
         # ------------------------------
 
         # The 6 degrees of freedom
@@ -1083,24 +1116,28 @@ class CubicSymmetricAssembly(Assembly):
                                 *[f"JUMP3fold1{i}1_{d}" for i in range(1, subunits_in_other_highfold + 1)],
                                 *[f"JUMP2fold1{i}1_{d}" for i in range(1, subunits_in_other_highfold + 1)])
 
-        setup.add_jumpgroup("JUMPGROUP7", *[f"JUMPHFfold1{i}1_subunit" for i in range(1, highest_fold + 1)],
+        setup.add_jumpgroup("JUMPGROUP7", *[f"JUMPHFfold1{i}1_sds" for i in range(1, highest_fold + 1)],
+                            *[f"JUMP3fold1{i}1_sds" for i in range(1, subunits_in_other_highfold + 1)],
+                            *[f"JUMP2fold1{i}1_sds" for i in range(1, subunits_in_other_highfold + 1)])
+
+        setup.add_jumpgroup("JUMPGROUP8", *[f"JUMPHFfold1{i}1_subunit" for i in range(1, highest_fold + 1)],
                             *[f"JUMP3fold1{i}1_subunit" for i in range(1, subunits_in_other_highfold + 1)],
                             *[f"JUMP2fold1{i}1_subunit" for i in range(1, subunits_in_other_highfold + 1)])
 
         # If T, skip adding bonus to the extra-3-fold subunit since it is the same as the other one
         if self.get_symmetry() == "T":
-            setup.energies = "{}*VRTHFfold111_z + " \
-                             "{}*(VRTHFfold111_z:VRTHFfold121_z) + " \
-                             "{}*(VRTHFfold111_z:VRT3fold111_z) + " \
-                             "{}*(VRTHFfold111_z:VRT2fold111_z) + " \
-                             "{}*(VRTHFfold111_z:VRT3fold121_z)".format(*self.get_energies())
+            setup.energies = "{}*VRTHFfold111_sds + " \
+                             "{}*(VRTHFfold111_sds:VRTHFfold121_sds) + " \
+                             "{}*(VRTHFfold111_sds:VRT3fold111_sds) + " \
+                             "{}*(VRTHFfold111_sds:VRT2fold111_sds) + " \
+                             "{}*(VRTHFfold111_sds:VRT3fold121_sds)".format(*self.get_energies())
         else:
-            setup.energies = "{}*VRTHFfold111_z + " \
-                             "{}*(VRTHFfold111_z:VRTHFfold121_z) + " \
-                             "{}*(VRTHFfold111_z:VRTHFfold131_z) + " \
-                             "{}*(VRTHFfold111_z:VRT3fold111_z) + " \
-                             "{}*(VRTHFfold111_z:VRT2fold111_z) + " \
-                             "{}*(VRTHFfold111_z:VRT3fold121_z)".format(*self.get_energies())
+            setup.energies = "{}*VRTHFfold111_sds + " \
+                             "{}*(VRTHFfold111_sds:VRTHFfold121_sds) + " \
+                             "{}*(VRTHFfold111_sds:VRTHFfold131_sds) + " \
+                             "{}*(VRTHFfold111_sds:VRT3fold111_sds) + " \
+                             "{}*(VRTHFfold111_sds:VRT2fold111_sds) + " \
+                             "{}*(VRTHFfold111_sds:VRT3fold121_sds)".format(*self.get_energies())
 
         # finally, in order to be z_angle(0) to be the same for all structures, we rotate the following vrts along their axis
         # "VRTHFfold", "VRT3fold", "VRT2fold".

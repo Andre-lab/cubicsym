@@ -6,6 +6,29 @@ Tests for the CubicAssembly class
 @Date: 4/6/22
 """
 
+# def test_from_rosetta_input():
+#     from cubicsym.assembly.cubicassembly import CubicSymmetricAssembly
+#     pdbs = ["/home/mads/production/evodock/results/globalfrommultimer_others_1_take_2/6HSB/relax_new/out/input_input_relaxed_model_4_multimer_v2_pred_14_C_3_multi_up.prepack52_83_gen.pdb",
+#
+#     ]
+#     symdefs = ["/home/mads/production/evodock/results/globalfrommultimer_others_1_take_2/6HSB/relax_new/out/input_relaxed_model_4_multimer_v2_pred_14_C_3_multi_up.prepack52_83_gen.symm"
+#                ""]
+#     for name, sym in zip(("6HSB"), ("T",)):
+#         path = f"/home/shared/databases/SYMMETRICAL/{sym}/unrelaxed/native"
+#         ca = CubicSymmetricAssembly(f"{path}/{name}.cif", sym)
+#         ca.output(f"outputs/{name}_test.cif", map_subunit_ids_to_chains=True)
+#         # test in future
+#         input_name = f"outputs/{name}.pdb"
+#         symmetry_name = f"outputs/{name}.symm"
+#         repr_name = f"outputs/{name}_repr.pdb"
+#         ico_name = f"outputs/{name}_ico.cif"
+#         ico_name_ideal = f"outputs/{name}_ico_ideal.cif"
+#         ca.output_rosetta_symmetry(symmetry_name=symmetry_name, input_name=input_name, master_to_use="1", idealize=True, outformat="pdb")
+#         create_symmetrical_pose(input_name, symmetry_name, repr_name)
+#         ca.output(ico_name)
+#         ca_ideal = CubicSymmetricAssembly.from_rosetta_input(input_name, symmetry_name)
+#         ca_ideal.output(ico_name_ideal)
+
 def test_assembly():
     from cubicsym.assembly.cubicassembly import CubicSymmetricAssembly
     from cubicsym.assembly.assembly import Assembly

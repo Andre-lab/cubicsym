@@ -20,7 +20,7 @@ from cubicsym.utilities import pose_cas_are_identical, get_chain_map
 class SymDefSwapper:
     """Swaps symmetry between HF-fold, 3F-fold and 2F-fold based symmetries of a cubic symmetrical pose."""
 
-    def __init__(self, pose_X, symdef, visualizer=None, debug_mode=False):
+    def __init__(self, pose_X, symdef, visualizer=None, debug_mode=False, check_anchorage_when_debugging=False):
         """Initialize a SymDefSwapper object
 
         :param pose: Pose_X to read symmetry information from
@@ -29,8 +29,10 @@ class SymDefSwapper:
         :param debug_mode: Run in debug mode.
         """
         assert is_symmetric(pose_X)
-        cs = CubicSetup(symdef)
-        self.is_righthanded = cs.righthanded
+        if isinstance(symdef, CubicSetup):
+            cs = symdef
+        else:
+            cs = CubicSetup(symdef)
         self.monomer_sizes = pose_X.size()
         self.symmetry_type = cs.cubic_symmetry()
         if cs.is_normalized():
@@ -43,6 +45,7 @@ class SymDefSwapper:
         self.fold2F_setup.apply_dofs()
         self.visualizer = visualizer
         self.debug_mode = debug_mode
+        self.check_anchorage_when_debugging = check_anchorage_when_debugging
         self.sanity_check(pose_X)
 
     def generate_normalized_symmetries(self, pose_X):
@@ -75,12 +78,9 @@ class SymDefSwapper:
         2. Assert that pose_HF, pose_3F, pose_2 overlap with eachother."""
         pose_HF, pose_3F, pose_2F = self.create_remaing_folds(pose_X)
         # 1)
-        self.foldHF_setup.update_dofs_from_pose(pose_HF)
-        self.foldHF_setup.vrts_overlap_with_pose(pose_HF)
-        self.fold3F_setup.update_dofs_from_pose(pose_3F)
-        self.fold3F_setup.vrts_overlap_with_pose(pose_3F)
-        self.fold2F_setup.update_dofs_from_pose(pose_2F)
-        self.fold2F_setup.vrts_overlap_with_pose(pose_2F)
+        self.foldHF_setup.vrts_overlap_with_pose(pose_HF, update_and_apply_dofs=True)
+        self.fold3F_setup.vrts_overlap_with_pose(pose_3F, update_and_apply_dofs=True)
+        self.fold2F_setup.vrts_overlap_with_pose(pose_2F, update_and_apply_dofs=True)
         chain_map = get_chain_map(CubicSetup.cubic_symmetry_from_pose(pose_HF), self.foldHF_setup.righthanded)
         # 2)
         assert pose_cas_are_identical(pose_HF, pose_3F, pose_2F, map_chains=chain_map, atol=1e-3)
@@ -94,8 +94,8 @@ class SymDefSwapper:
             pose_3F = self.create_3fold_pose(pose_X)
             pose_2F = self.create_2fold_pose(pose_X)
         elif base == "3F":
-            pose_3F = pose_X
             pose_HF = self.create_hffold_pose(pose_X)
+            pose_3F = pose_X
             pose_2F = self.create_2fold_pose(pose_X)
         elif base == "2F":
             pose_HF = self.create_hffold_pose(pose_X)
@@ -139,23 +139,23 @@ class SymDefSwapper:
         assert math.isclose(rmsd, 0, abs_tol=1e-3)
         assert np.isclose(np.array(poseA.residue(1).atom("CA").xyz()), np.array(poseB.residue(1).atom("CA").xyz()), atol=1e-3).all()
 
-    def create_hffold_pose(self, pose, check_anchor_is_zero=False):
+    def create_hffold_pose(self, pose, check_anchor_is_zero=True):
         """Creates a HF-based symmetric pose from input pose"""
-        poseHF = CubicSetup.make_asymmetric_pose(pose, check_anchor_is_zero=check_anchor_is_zero)
+        poseHF = CubicSetup.make_asymmetric_pose(pose, check_anchor_is_zero= self.check_anchorage_when_debugging )
         self.foldHF_setup.make_symmetric_pose(poseHF)
         self.transfer_poseA2B(pose, poseHF)
         return poseHF
 
-    def create_3fold_pose(self, pose, check_anchor_is_zero=False):
+    def create_3fold_pose(self, pose, check_anchor_is_zero=True):
         """Creates a 3F-based symmetric pose from input pose"""
-        pose3 = CubicSetup.make_asymmetric_pose(pose, check_anchor_is_zero=check_anchor_is_zero)
+        pose3 = CubicSetup.make_asymmetric_pose(pose, check_anchor_is_zero= self.check_anchorage_when_debugging )
         self.fold3F_setup.make_symmetric_pose(pose3)
         self.transfer_poseA2B(pose, pose3)
         return pose3
 
-    def create_2fold_pose(self, pose, check_anchor_is_zero=False):
+    def create_2fold_pose(self, pose, check_anchor_is_zero=True):
         """Creates a 2F-based symmetric pose from input pose"""
-        pose2 = CubicSetup.make_asymmetric_pose(pose, check_anchor_is_zero=check_anchor_is_zero)
+        pose2 = CubicSetup.make_asymmetric_pose(pose, check_anchor_is_zero= self.check_anchorage_when_debugging )
         self.fold2F_setup.make_symmetric_pose(pose2)
         self.transfer_poseA2B(pose, pose2)
         return pose2
@@ -195,9 +195,9 @@ class SymDefSwapper:
 
         # update SetupA, the setup we are trying to get the the information from
         setupA.update_dofs_from_pose(poseA, apply_dofs=True)
+        setupB.update_dofs_from_pose(poseB, apply_dofs=True)
 
         if self.debug_mode:
-            setupB.update_dofs_from_pose(poseB, apply_dofs=True)
             assert np.isclose(np.array(poseB.residue(setupB.get_anchor_residue(poseB)).atom("CA").xyz()), setupB.get_vrt(f"VRT{jiB}fold111_sds").vrt_orig, atol=1e-2).all()
             assert np.isclose(np.array(poseA.residue(setupA.get_anchor_residue(poseA)).atom("CA").xyz()), setupA.get_vrt(f"VRT{jiA}fold111_sds").vrt_orig, atol=1e-2).all()
 
