@@ -36,7 +36,7 @@ def test_rmsd_7q03():
     from simpletestlib.test import setup_test
     from cubicsym.cubicsetup import CubicSetup
     from pyrosetta import pose_from_file
-    from cubicsym.paths import SYMMETRICAL
+    from cubicsym.private_paths import SYMMETRICAL
     sym, pdbid, fold = "T", "7Q03", "2F"
     native, pmm, cmd = setup_test(name=sym, file=pdbid, mute=True, symmetrize=True, reinitialize=False)
     norm_cs = CubicSetup()
@@ -71,7 +71,7 @@ def test_rmsd():
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str
     from pyrosetta import pose_from_file
-    from cubicsym.paths import SYMMETRICAL
+    from cubicsym.private_paths import SYMMETRICAL
     import pandas as pd
     from random import randint
     selection = { "T": {

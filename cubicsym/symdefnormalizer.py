@@ -5,6 +5,7 @@ SymdefNormalizer class
 @Author: Mads Jeppesen
 @Date: 12/13/22
 """
+import cubicsym.private_paths
 from cubicsym.cubicsetup import CubicSetup
 from symmetryhandler.mathfunctions import vector_angle, vector_projection_on_subspace, rotation_matrix
 import math
@@ -38,7 +39,7 @@ class SymdefNormalizer:
     def get_5fold_angle_to_z(self, cs):
         v1 = cs.get_vrt("VRT2fold111")._vrt_orig - cs.get_vrt("VRT2fold11")._vrt_orig
         v2 = cs.get_vrt("VRT2fold121")._vrt_orig - cs.get_vrt("VRT2fold11")._vrt_orig
-        v1n, v2n = scipy.linalg.orth(np.array([v1, v2]).T).T
+        v1n, v2n = cubicsym.private_paths.T
         z_on_5fold = vector_projection_on_subspace([0, 0, 1], v1n, v2n)
         return vector_angle(v2, z_on_5fold)
 

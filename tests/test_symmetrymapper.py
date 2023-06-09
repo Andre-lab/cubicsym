@@ -330,7 +330,7 @@ def test_run_recapitulation():
     from cubicsym.symdefnormalizer import SymdefNormalizer
 
     from pathlib import Path
-    from cubicsym.paths import T
+    from cubicsym.private_paths import T
     from cubicsym.setupaligner import SetupAligner
     from pyrosetta.rosetta.core.pose.symmetry import extract_asymmetric_unit
     import pandas as pd
@@ -431,7 +431,7 @@ def test_run():
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str
     from cubicsym.symdefnormalizer import SymdefNormalizer
     from pathlib import Path
-    from cubicsym.paths import T
+    from cubicsym.private_paths import T
     from cubicsym.setupaligner import SetupAligner
     import pandas as pd
     pmm = setup_pymol()

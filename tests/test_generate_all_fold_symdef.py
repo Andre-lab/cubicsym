@@ -17,7 +17,7 @@ def test_generate_all_fold_symdef():
 def test_generate_for_test_purposes_for_evodock():
     from scripts.generate_all_fold_symdef import main, create_other_symmetries
     input = "inputs/2CC9.cif"
-    from cubicsym.paths import T
+    from cubicsym.private_paths import T
     p = T.parent.parent.joinpath("idealized")
     file = "6M8V"
     input = str(p.joinpath(f"input/native/{file}.cif"))

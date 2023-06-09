@@ -18,7 +18,12 @@ cd ./cubicsym
 pip setup.py install 
 ```
 
+# THERE ARE PROBLEMS WITH mpi4py
 if using M1 Mac chips install mpi4py seperately with brew:
+nope
+
+I can get it to work on linux with a conda install of mpi4py. openmpi needs to be installed as well.
+
 ```console
 brew install mpi4py
 ```

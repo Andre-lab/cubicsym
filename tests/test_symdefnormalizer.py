@@ -9,7 +9,7 @@ Test for the SymdefNormalizer class
 def test_apply_but_only_benchmark_folds():
     from cubicsym.symdefnormalizer import SymdefNormalizer
     from cubicsym.cubicsetup import CubicSetup
-    from cubicsym.paths import SYMMETRICAL
+    from cubicsym.private_paths import SYMMETRICAL
     from pyrosetta import pose_from_file
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from cubicsym.setupaligner import SetupAligner
@@ -149,7 +149,7 @@ def test_apply_but_only_benchmark_folds():
 def test_apply():
     from cubicsym.symdefnormalizer import SymdefNormalizer
     from cubicsym.cubicsetup import CubicSetup
-    from cubicsym.paths import SYMMETRICAL
+    from cubicsym.private_paths import SYMMETRICAL
     from pyrosetta import pose_from_file
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from cubicsym.setupaligner import SetupAligner

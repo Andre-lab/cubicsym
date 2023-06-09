@@ -10,7 +10,7 @@ def test_right_to_left_mapping():
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str
     from cubicsym.symdefnormalizer import SymdefNormalizer
     from cubicsym.cubicsetup import CubicSetup
-    from cubicsym.paths import SYMMETRICAL
+    from cubicsym.private_paths import SYMMETRICAL
     from pyrosetta import pose_from_file, Pose
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from cubicsym.setupaligner import SetupAligner

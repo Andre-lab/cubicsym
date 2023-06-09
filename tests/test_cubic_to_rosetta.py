@@ -9,7 +9,7 @@ import argparse
 import os
 from unittest import mock
 import pandas as pd
-from cubicsym.paths import I, O, T, IP
+from cubicsym.private_paths import I, O, T, IP
 from pathlib import Path
 
 def test_quality_assurance():
