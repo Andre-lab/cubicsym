@@ -13,7 +13,7 @@ import argparse
 from mpi4py import MPI
 comm = MPI.COMM_WORLD
 
-description = textwrap.dedent("""Creates a T1 capsid from a pdb protein structure. 
+description = textwrap.dedent("""Creates a cubic symdef file from a pdb protein structure. 
 The input structure can be of 2 types. 
 1): A structure consisting of the symmetrical representation of a capsid in Rosetta (multiple chains).
 2): A structure consisting of a single chain with a SYMMETRY comment 
