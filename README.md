@@ -7,7 +7,8 @@ It can be used as a library but also contains import scripts for 2 purposes:
 
 # Installation
 
-The following packages must be installed: 
+The following must be installed: 
+* Python-3.6 or later (PyRosetta dependency). 
 * PyRosetta http://www.pyrosetta.org/dow (Can be installed with Anaconda)
 * MAFFT (https://mafft.cbrc.jp/alignment/software/) (can be installed with Anaconda/brew/apt)
 * mpi4py (https://mpi4py.readthedocs.io/en/stable/install.html) (can be install with Anaconda/pip)

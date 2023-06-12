@@ -21,5 +21,5 @@ setup(
             "pytest",
             "scipy",
             "pyyaml"
-	]
+	],
 )
