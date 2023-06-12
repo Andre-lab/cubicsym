@@ -15,10 +15,11 @@ setup(
 	install_requires = [
             "symmetryhandler @ git+https://github.com/Andre-lab/symmetryhandler",
             "requests",
-            "mpi4py",
             "numpy",
             "pandas",
             "biopython",
-            "pytest"
+            "pytest",
+            "scipy",
+            "pyyaml"
 	]
 )

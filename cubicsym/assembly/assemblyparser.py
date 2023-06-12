@@ -97,7 +97,7 @@ class AssemblyParser:
         else:
             p = PDBParser(PERMISSIVE=1)
         structure = p.get_structure(file, file)
-        global_z = setup.get_vrt_name("VRTglobal")._vrt_z
+        global_z = setup.get_vrt("VRTglobal")._vrt_z
 
         # Variable that will contain all chains of the assembly
         chains = []
@@ -115,9 +115,9 @@ class AssemblyParser:
 
         # The 3 5-fold axes availble for an icosahedral structure in the symmetry file
         # minus because rosetta is awesome and have turned the coordinate systems arounD
-        z15 = -setup.get_vrt_name("VRTHFfold")._vrt_z
-        z25 = -setup.get_vrt_name("VRT2fold")._vrt_z
-        z35 = -setup.get_vrt_name("VRT3fold")._vrt_z
+        z15 = -setup.get_vrt("VRTHFfold")._vrt_z
+        z25 = -setup.get_vrt("VRT2fold")._vrt_z
+        z35 = -setup.get_vrt("VRT3fold")._vrt_z
 
         # construct assembly
         assembly = Assembly()

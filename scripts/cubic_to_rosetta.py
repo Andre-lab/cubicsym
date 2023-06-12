@@ -227,7 +227,7 @@ def main():
     parser.add_argument('--symmetry', help="Symmetry to generate. Either use 'I', 'O', 'T' or the assembly id number to generate the symmetry from. "
                                            "If 'I', 'O' or 'T' is used the script will iterate through each available assembly, check its symmetry,"
                                            "and return the first instance of the assembly with the corresponding symmetry. If a number is used instead the script will "
-                                           "attempt to generate whatever cubic symmetrical structure it corresponds to (if possible).", type=str)
+                                           "attempt to generate whatever cubic symmetrical structure it corresponds to (if possible).", type=str, required=True)
     parser.add_argument('--output_generated_structure', help="Outputs the generated structure only and the scripts ends."
                                                              "Useful if specifying subunit numbers through --hf1 or equivalent.", action="store_true")
     # foldmap options

@@ -9,7 +9,8 @@ It can be used as a library but also contains import scripts for 2 purposes:
 
 The following packages must be installed: 
 * PyRosetta http://www.pyrosetta.org/dow (Can be installed with Anaconda)
-* MAFFT (https://mafft.cbrc.jp/alignment/software/) (can be installed with brew/apt)
+* MAFFT (https://mafft.cbrc.jp/alignment/software/) (can be installed with Anaconda/brew/apt)
+* mpi4py (https://mpi4py.readthedocs.io/en/stable/install.html) (can be install with Anaconda/pip)
 
 Clone the cubicsym repository and ```cd``` into it. Then run the install script.
 ```console
@@ -18,23 +19,13 @@ cd ./cubicsym
 pip setup.py install 
 ```
 
-# THERE ARE PROBLEMS WITH mpi4py
-if using M1 Mac chips install mpi4py seperately with brew:
-nope
-
-I can get it to work on linux with a conda install of mpi4py. openmpi needs to be installed as well.
-
-```console
-brew install mpi4py
-```
-
 ## Generating cubic symdef files 
 ```scripts/cubic_to_rosetta.py``` generates cubic symmetry files of either **Icosahedral**, **Octahedral** or **Tetrahedral symmetry**. 
 The usage of the script is well documented. Use `python cubic_to_rosetta.py --help` to see more. 
 A basic test can be run (inside the `cubicsym` dir) with 
 
 ```console
-python scripts/cubic_to_rosetta.py --structures tests/inputs/1stm.cif
+python scripts/cubic_to_rosetta.py --structures tests/inputs/1stm.cif --symmetry I   --symdef_outpath tests/outputs/ --input_outpath tests/outputs/ --rosetta_repr 1 --rosetta_repr_outpath tests/outputs/ --overwrite
 ```
 
 ## Generating full biological structures 
@@ -43,7 +34,7 @@ The usage of the script is well documented. Use `python cubic_form_rosetta.py --
 A basic test can be run with
 
 ```console
-python scripts/cubic_from_rosetta.py --structures tests/inputs/1stm.cif --symm_files 
+python scripts/cubic_from_rosetta.py --structures tests/outputs/1stm_rosetta.pdb --symmetry_files tests/outputs/1stm.symm -o tests/outputs/
 ```
 
 
