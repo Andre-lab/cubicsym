@@ -15,6 +15,7 @@ from pyrosetta.rosetta.core.id import AtomID_Map_AtomID
 from pyrosetta.rosetta.core.id import AtomID
 from pyrosetta.rosetta.core.pose import initialize_atomid_map
 from pyrosetta import Vector1
+import numpy as np
 
 class AtomSelector:
 
