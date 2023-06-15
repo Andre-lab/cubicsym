@@ -6,4 +6,4 @@ Paths to different databases + IP addres to server
 @Date: 4/7/22
 """
 from pathlib import Path
-DATA = Path(".").resolve().parent.joinpath("data")
+DATA = Path(__file__ ).parent.parent.joinpath("data")

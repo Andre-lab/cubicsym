@@ -7,11 +7,9 @@ Class for Matcher
 """
 import numpy as np
 from pyrosetta.rosetta.core.scoring import CA_rmsd
-from shapedesign.src.utilities.alignment import tmalign
+from cubicsym.alignment import tmalign
 from pyrosetta.rosetta.std import map_unsigned_long_unsigned_long # core::Size, core::Size
-
 from cubicsym.alignment import sequence_alignment_on_chain_set
-
 
 class Matcher:
     """After some experimentation it seems like both of the functions CA_rmsd and tmalign aligns correctly but bases their score

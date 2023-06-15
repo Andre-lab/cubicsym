@@ -436,7 +436,6 @@ class CubicBoundary:
                 return False
         return True
 
-
     def all_dofs_within_bounds(self, pose, raise_assertion=False, raise_warning=False):
         """Checks if all the dofs of the pose are within bounds."""
         for jump_name, jumpdof_params in self.dof_spec.dof_spec.items():

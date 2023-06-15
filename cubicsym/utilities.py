@@ -262,9 +262,9 @@ def add_base_to_pose(pose):
     stringmap.map()["id"] = f"{base}"
 
 def add_id_to_pose_w_base(pose, id_):
-    assert is_symmetric(pose)
-    if not pose.data().has(CacheableDataType.ARBITRARY_STRING_DATA):
-        pose.data().set(CacheableDataType.ARBITRARY_STRING_DATA, CacheableStringMap())
-    stringmap = pose.data().get_ptr(CacheableDataType.ARBITRARY_STRING_DATA)
-    base = get_base_from_pose(pose)
-    stringmap.map()["id"] = f"{id_}+{base}"
+    if is_symmetric(pose):
+        if not pose.data().has(CacheableDataType.ARBITRARY_STRING_DATA):
+            pose.data().set(CacheableDataType.ARBITRARY_STRING_DATA, CacheableStringMap())
+        stringmap = pose.data().get_ptr(CacheableDataType.ARBITRARY_STRING_DATA)
+        base = get_base_from_pose(pose)
+        stringmap.map()["id"] = f"{id_}+{base}"
