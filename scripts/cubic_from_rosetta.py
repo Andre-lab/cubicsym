@@ -12,38 +12,37 @@ import numpy as np
 import argparse
 from mpi4py import MPI
 comm = MPI.COMM_WORLD
+from argparse import RawDescriptionHelpFormatter
 
-description = textwrap.dedent("""Creates a cubic symdef file from a pdb protein structure. 
-The input structure can be of 2 types. 
-1): A structure consisting of the symmetrical representation of a capsid in Rosetta (multiple chains).
-2): A structure consisting of a single chain with a SYMMETRY comment 
+description = textwrap.dedent("""Creates a cubic symmetry file from a Rosetta output file and its symmetry definition file.
 
-If using 1): Supply both --structures and --sym_files
-If using 2): Supply only --structures 
+The input structure can be of 2 types.
 
-You can run both single or multiple structures.
+1): A structure consisting of the symmetrical representation of a capsid in Rosetta (multiple chains). In that case
+supply both --structures and --sym_files 
 
-IF SCRIPTS ARE INSTALLED IN YOUR ENVIRONMENT LEAVE OUT 'python'
+2): A structure consisting of a single chain with a SYMMETRY comment (EXPERIMENTAL FOR NOW). In that case supply only
+--structures 
 
-Example of running with a single structure:
-1) python capsid_from_rosetta.py --structures <s> --symm_files <y>
-2) python capsid_from_rosetta.py --structures <s> 
+The simplest way to run the script is as so (with r1 being a Rosetta output file and s1 the symmetry file):
 
-Example of running with multiple structures:
-1) python capsid_from_rosetta.py --structures <s1> <s2> <s3> --symm_files <y1> <y2> <y3>
-2) python capsid_from_rosetta.py --structures <s1> <s2> <s3>
+python --structures <r1> --symmetry_files <s1>
 
-The order is important. So the structure s1 should match the symmetry file y1 and so on. This also goes for the
+or (i1 being an input file)
+
+python --structures <r1> 
+
+The script can be used together with openmpi to accept multiple structures and symmetry files (r1/s1, r2/s2 and r3/s3):
+
+mpirun -n <cores> python --structures <r1> <r2> <r3> --symmetry_files  <s1> <s2> <s3>
+
+The order is important. So the structure r1 should match the symmetry file s1 and so on. This also goes for the
 other options (see below).
-
-The script is MPI compliant so you can run it with MPI as so: 
-
-mpirun -n <number of cores> python capsid_from_rosetta.py ...options...
 """)
 
 def main():
     """Generates a capsid representation from a structure file"""
-    parser = argparse.ArgumentParser(description=description)
+    parser = argparse.ArgumentParser(description=description, formatter_class=RawDescriptionHelpFormatter)
     parser.add_argument('-s', '--structures', help="Structure output from rosetta.", nargs="+", required=True)
     parser.add_argument("-o", '--out_dirs',help="Paths to the output dir", default=".", nargs="+")
     parser.add_argument('--symmetry_files', help="Symmdef files used to represent the structures in Rosetta.", nargs="+")

@@ -211,7 +211,7 @@ def test_foldmap():
     repr_name = f"outputs/{name}_repr.pdb"
     ico_name = f"outputs/{name}_ico.cif"
     ico_name_ideal = f"outputs/{name}_ico_ideal.cif"
-    ca.output_rosetta_symmetry(symmetry_name=symmetry_name, input_name=input_name, master_to_use="1", idealize=True, outformat="pdb",
+    ca.output_rosetta_symmetry(symmetry_name=symmetry_name, input_name=input_name, master_to_use="1", idealize=True, outformat="cif",
                                foldmap=foldmap)
     create_symmetrical_pose(input_name, symmetry_name, repr_name)
     ca.output(ico_name)

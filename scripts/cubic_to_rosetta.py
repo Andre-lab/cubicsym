@@ -220,11 +220,18 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
 
 def main():
     text = """From a mmCIF file containing cubic symmetry information (I/O/T) this script makes a symmetry definition 
-file and an input file for use in Rosetta modellling. See here for more information of symmetry in Rosetta: 
+file and an input file for use in Rosetta modelling. See here for more information of symmetry in Rosetta: 
+https://www.rosettacommons.org/docs/latest/rosetta_basics/structural_concepts/symmetry.
 
-https://www.rosettacommons.org/docs/latest/rosetta_basics/structural_concepts/symmetry."
+The simplest way to run the script is (with s1 being an mmCIF file):
 
-There are 2 ways to use the script: 
+python --structures <s1> --symmetry <target symmetry type>
+
+The script can be used together with openmpi to accept multiple structures (s1, s2 and s3). In that case run as:
+
+mpirun -n <cores> python --structures <s1> <s2> <s3> --symmetry <target symmetry type>
+
+There are 2 modes to use the script: 
 
 1. Automatic way: 
 When using the automatic way one only needs to specify --structures and --symmetry (see options below). 
@@ -240,11 +247,11 @@ generate an output file of the full biological assembly. Look at the output in a
 Chimera) and from it assign the subunit numbers to the options. These numbers should always be related to the main subunit.
 
 For additional information and for commandline tests for the script see: 
-
 https://github.com/Andre-lab/cubicsym
 """
     import argparse
-    parser = argparse.ArgumentParser(description=text)   # input structures
+    from argparse import RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(description=text, formatter_class=RawDescriptionHelpFormatter)   # input structures
     parser.add_argument('--structures', help="mmCIF files to read.", nargs="+", type=str, required=True)
     parser.add_argument('--symmetry', help="Symmetry to generate. Either use 'I', 'O', 'T' or the assembly id number to generate the symmetry from. "
                                            "If 'I', 'O' or 'T' is used the script will iterate through each available assembly, check its symmetry,"
