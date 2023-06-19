@@ -13,6 +13,14 @@ The following must be installed:
 * MAFFT (https://mafft.cbrc.jp/alignment/software/) (can be installed with Anaconda/brew/apt)
 * mpi4py (https://mpi4py.readthedocs.io/en/stable/install.html) (can be install with Anaconda/pip)
 
+A specifc PyRosetta branch needs to be installed. Obtain a license from the link above and then download the following wheel file from [Coming soon]. Then run:
+
+```console
+pip install [coming soon]
+```
+
+Then 
+
 Clone the cubicsym repository and ```cd``` into it. Then run the install script.
 ```console
 git clone https://github.com/Andre-lab/cubicsym.git

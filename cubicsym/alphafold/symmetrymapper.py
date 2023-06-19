@@ -184,9 +184,9 @@ class SymmetryMapper:
 
         # check for succes
         # FIXME
-        exit("YOU NEED TO FIX the return statement here. The below thing will produce an error.")
         if not combo_info.get("success"):
             print(f"{pose_asym.pdb_info().name()} is not {cn}-fold symmetric and will not be used.")
+            return None, None, None, None, None, None, None
         else:
             # extract the best combination and rerun the make_symdef_file.sh script with that
             main_str, other_str = combo_info["best_combo"]
