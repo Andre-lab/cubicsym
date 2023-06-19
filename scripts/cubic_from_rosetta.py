@@ -30,7 +30,7 @@ python --structures <r1> --symmetry_files <s1>
 
 or (i1 being an input file)
 
-python --structures <r1> 
+python --structures <i1> 
 
 The script can be used together with openmpi to accept multiple structures and symmetry files (r1/s1, r2/s2 and r3/s3):
 
