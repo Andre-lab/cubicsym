@@ -219,23 +219,34 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="From a mmcif file containing cubic symmetry information (I/O/T) this script makes a cubic symdef file, "
-                                                 "Rosetta input file, and if set, the full cubic representation and the Rosetta "
-                                                 "representaion from the protein in the mmcif file(s)")
+    parser = argparse.ArgumentParser(description="From a mmCIF file containing cubic symmetry information (I/O/T) this script makes a symmetry definition file and "
+                                                 "an input file for use in Rosetta modellling. See here for more information of symmetry in Rosetta: https://www.rosettacommons.org/docs/latest/rosetta_basics/structural_concepts/symmetry."
+                                                 "\n"
+                                                 "There are 2 ways to use the script: an automatic way and a manual way. When using the automatic way one only needs "
+                                                 "to specify --structures and --symmetry (see options below). In case the automatic way fails, one can use the manual way. When using the manual way one needs to specify "
+                                                 "--hf1, --hf2, --hf3, --f3, --f21 and --f22 as well. 'hf' stands for higest fold which corresponds to the highest symmetrical fold "
+                                                 "for the system which for an icosahedral structure is the 5-fold, for the octahedral structure the 4-fold and for the tetrahedral "
+                                                 "structrure the 3-fold. 'f3' stands for the 3-fold (which all cubic structures have) and f21 and f22 the two 2-folds. " 
+                                                 "Subunit numbers should be given to each of these options to determine the symmetry as they are assigned to by the script. "
+                                                 "To see the subunit numbers first run the script with the flag: --output_generated_structure. This will generate an output file of the full biological assembly. "
+                                                 "Look at the output in a structural program (like PyMOL or Chimera) and from it assign the subunit numbers to the options. These numbers should always"
+                                                 "be related to the main subunit."
+                                                 "\n"
+                                                 "For additional information and for commandline tests for the script see: https://github.com/Andre-lab/cubicsym.")
     # input structures
-    parser.add_argument('--structures', help="mmcif files to read.", nargs="+", type=str)
+    parser.add_argument('--structures', help="mmCIF files to read.", nargs="+", type=str, required=True)
     parser.add_argument('--symmetry', help="Symmetry to generate. Either use 'I', 'O', 'T' or the assembly id number to generate the symmetry from. "
                                            "If 'I', 'O' or 'T' is used the script will iterate through each available assembly, check its symmetry,"
                                            "and return the first instance of the assembly with the corresponding symmetry. If a number is used instead the script will "
                                            "attempt to generate whatever cubic symmetrical structure it corresponds to (if possible).", type=str, required=True)
-    parser.add_argument('--output_generated_structure', help="Outputs the generated structure only and the scripts ends."
+    parser.add_argument('--output_generated_structure', help="Output the full biological assembly only and the scripts ends."
                                                              "Useful if specifying subunit numbers through --hf1 or equivalent.", action="store_true")
     # foldmap options
     #### FIXME: make them mpi compliant
     # fixme: have this be chain ids instead of the subunit number in biopython.
     #  You could force the user to specify only 60 letters and if the person has 120 or 180 subunits 2 or 3 subunits should have
     #  the same letter
-    parser.add_argument('--hf1', help="The subunit numbers of the HF that the main subunit will consists of.", nargs="+", type=str)
+    parser.add_argument('--hf1', help="The subunit numbers of the hf that the main subunit will consists of.", nargs="+", type=str)
     parser.add_argument('--hf2', help="The subunit numbers of the second HF. Must be specified together with --hf3.", nargs="+", type=str)
     parser.add_argument('--hf3', help="The subunit numbers of the third HF. Must be specified together with --hf2.", nargs="+", type=str)
     parser.add_argument('--f3', help="The subunit numbers of the 3-fold", nargs="+", type=str)
@@ -244,7 +255,6 @@ def main():
     # input options
     parser.add_argument('--ignore_chains', help="Will ignore these chains for all input structures.", nargs="+", type=str)
     parser.add_argument('--main_id', help="The subunit id for the main subunit", type=str, default="1")
-    ####
     # overwrite
     parser.add_argument('--overwrite', help="To overwrite the files (and if set, the report), or not", action="store_true")
     # on/off for output
@@ -255,7 +265,7 @@ def main():
     parser.add_argument('--symmetry_visualization', help="ouputs a symmetry visualization script that can be used in pymol.",  default=False, type=bool)
     parser.add_argument('--report', help="Output a report file that reports symmetry information and any errors occured during the program. "
                                          "Notice that the program will not exit if an exception occurs. Check the report script for which "
-                                         "error actually occured in that case.", default=False, type=bool)
+                                         "error actually occurred in that case.", default=False, type=bool)
     # output paths
     parser.add_argument('--symdef_outpath', help="Path to the directory of where to output the symdef files.", default=".", type=str)
     parser.add_argument('--input_outpath', help="Path to the directory of where to output the Rosetta input pdb files.", default=".", type=str)
