@@ -122,7 +122,8 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
                         rosetta_repr, rosetta_repr_names, rosetta_repr_outpath, crystal_repr, crystal_repr_names, crystal_repr_outpath,
                         full_repr, full_repr_names, full_repr_outpath,
                         symmetry_visualization, symmetry_visualization_names, symmetry_visualization_outpath, quality_assurance_on,
-                        idealize, report, report_outpath, report_names, ignore_chains, main_id, foldmap, output_generated_structure):
+                        idealize, report, report_outpath, report_names, ignore_chains, main_id, foldmap, output_generated_structure,
+                        output_generated_structure_path):
     """Makes a cubic symdef and Rosetta input file and optionally the full cubic structure, the Rosetta representation
     structure and a symmetry visualization script."""
     for structure, symdef_name, input_name, rosetta_repr_name, crystal_repr_name, full_repr_name, symvis_name, report_name in zip(structures, symdef_names, input_names,
@@ -148,7 +149,7 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
         try:
             full = CubicSymmetricAssembly(mmcif_file=structure, mmcif_symmetry=symmetry, ignore_chains=ignore_chains)
             if output_generated_structure:
-                name = f"{Path(structure).stem}_generated.cif"
+                name = f"{output_generated_structure_path}/{Path(structure).stem}_generated.cif"
                 print("Dumps the generated structure to disk:", name)
                 full.output(name, map_subunit_ids_to_chains=True)
                 return
@@ -218,22 +219,32 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
                 print(f"{k}:", "v")
 
 def main():
+    text = """From a mmCIF file containing cubic symmetry information (I/O/T) this script makes a symmetry definition 
+file and an input file for use in Rosetta modellling. See here for more information of symmetry in Rosetta: 
+
+https://www.rosettacommons.org/docs/latest/rosetta_basics/structural_concepts/symmetry."
+
+There are 2 ways to use the script: 
+
+1. Automatic way: 
+When using the automatic way one only needs to specify --structures and --symmetry (see options below). 
+
+2. Manual way: 
+In case the automatic way fails, one can use the manual way. When using the manual way one needs to specify --hf1, --hf2, 
+--hf3, --f3, --f21 and --f22 as well. 'hf' stands for highest fold which corresponds to the highest symmetrical fold for
+the system which for an icosahedral structure is the 5-fold, for the octahedral structure the 4-fold and for the 
+tetrahedral structure the 3-fold. 'f3' stands for the 3-fold (which all cubic structures have) and f21 and f22 the two 
+2-folds. Subunit numbers should be given to each of these options to determine the symmetry as they are assigned to by 
+the script. To see the subunit numbers, first run the script with the flag: --output_generated_structure. This will 
+generate an output file of the full biological assembly. Look at the output in a structural program (like PyMOL or 
+Chimera) and from it assign the subunit numbers to the options. These numbers should always be related to the main subunit.
+
+For additional information and for commandline tests for the script see: 
+
+https://github.com/Andre-lab/cubicsym
+"""
     import argparse
-    parser = argparse.ArgumentParser(description="From a mmCIF file containing cubic symmetry information (I/O/T) this script makes a symmetry definition file and "
-                                                 "an input file for use in Rosetta modellling. See here for more information of symmetry in Rosetta: https://www.rosettacommons.org/docs/latest/rosetta_basics/structural_concepts/symmetry."
-                                                 "\n"
-                                                 "There are 2 ways to use the script: an automatic way and a manual way. When using the automatic way one only needs "
-                                                 "to specify --structures and --symmetry (see options below). In case the automatic way fails, one can use the manual way. When using the manual way one needs to specify "
-                                                 "--hf1, --hf2, --hf3, --f3, --f21 and --f22 as well. 'hf' stands for higest fold which corresponds to the highest symmetrical fold "
-                                                 "for the system which for an icosahedral structure is the 5-fold, for the octahedral structure the 4-fold and for the tetrahedral "
-                                                 "structrure the 3-fold. 'f3' stands for the 3-fold (which all cubic structures have) and f21 and f22 the two 2-folds. " 
-                                                 "Subunit numbers should be given to each of these options to determine the symmetry as they are assigned to by the script. "
-                                                 "To see the subunit numbers first run the script with the flag: --output_generated_structure. This will generate an output file of the full biological assembly. "
-                                                 "Look at the output in a structural program (like PyMOL or Chimera) and from it assign the subunit numbers to the options. These numbers should always"
-                                                 "be related to the main subunit."
-                                                 "\n"
-                                                 "For additional information and for commandline tests for the script see: https://github.com/Andre-lab/cubicsym.")
-    # input structures
+    parser = argparse.ArgumentParser(description=text)   # input structures
     parser.add_argument('--structures', help="mmCIF files to read.", nargs="+", type=str, required=True)
     parser.add_argument('--symmetry', help="Symmetry to generate. Either use 'I', 'O', 'T' or the assembly id number to generate the symmetry from. "
                                            "If 'I', 'O' or 'T' is used the script will iterate through each available assembly, check its symmetry,"
@@ -246,12 +257,14 @@ def main():
     # fixme: have this be chain ids instead of the subunit number in biopython.
     #  You could force the user to specify only 60 letters and if the person has 120 or 180 subunits 2 or 3 subunits should have
     #  the same letter
-    parser.add_argument('--hf1', help="The subunit numbers of the hf that the main subunit will consists of.", nargs="+", type=str)
-    parser.add_argument('--hf2', help="The subunit numbers of the second HF. Must be specified together with --hf3.", nargs="+", type=str)
-    parser.add_argument('--hf3', help="The subunit numbers of the third HF. Must be specified together with --hf2.", nargs="+", type=str)
-    parser.add_argument('--f3', help="The subunit numbers of the 3-fold", nargs="+", type=str)
-    parser.add_argument('--f21', help="The subunit numbers of the first 2-fold. Must be specified together with --22.", nargs="+", type=str)
-    parser.add_argument('--f22', help="The subunit numbers of the first 2-fold. Must be specified together with --21.", nargs="+", type=str)
+    parser.add_argument('--hf1', help="The subunit numbers of the highest fold (I=5/O=4/T=3) that the main subunit is in.", nargs="+", type=str)
+    parser.add_argument('--hf2', help="The subunit numbers of the second the highest fold (I=5/O=4/T=3) that the main subunit is related to through its 3-fold. "
+                                      "Must be specified together with --hf3.", nargs="+", type=str)
+    parser.add_argument('--hf3', help="The subunit numbers of the third the highest fold (I=5/O=4/T=3) that the main subunit is related to through its 3-fold. "
+                                      "Must be specified together with --hf2.", nargs="+", type=str)
+    parser.add_argument('--f3', help="The subunit numbers of the 3-fold that the main subunit is in.", nargs="+", type=str)
+    parser.add_argument('--f21', help="The subunit numbers of the first 2-fold that the main subunit is in. Must be specified together with --22.", nargs="+", type=str)
+    parser.add_argument('--f22', help="The subunit numbers of the second 2-fold that the main subunit is in. Must be specified together with --21.", nargs="+", type=str)
     # input options
     parser.add_argument('--ignore_chains', help="Will ignore these chains for all input structures.", nargs="+", type=str)
     parser.add_argument('--main_id', help="The subunit id for the main subunit", type=str, default="1")
@@ -274,6 +287,8 @@ def main():
     parser.add_argument('--full_repr_outpath', help="Path to the directory of where to output files set with '--full_repr'", default=".", type=str)
     parser.add_argument('--symmetry_visualization_outpath', help="Path to the directory of where to output files set with '--symmetry_visualization'", default=".", type=str)
     parser.add_argument('--report_outpath', help="Path to the directory of where to output the report.", default=".", type=str)
+    parser.add_argument('--output_generated_structure_outpath', help="Path to the directory of where to output the generated structure made with the "
+                                                                     "--output_generated_structure flag.", default=".", type=str)
     # output names
     parser.add_argument('--symdef_names', help="Names given to the symmetry files.", default='<prefix>.symm', nargs="+", type=str)
     parser.add_argument('--input_names', help="Name given to input files.", default='<prefix>.cif', nargs="+", type=str)
@@ -332,7 +347,8 @@ def main():
                         args.rosetta_repr, args.rosetta_repr_names, args.rosetta_repr_outpath, args.crystal_repr, args.crystal_repr_names, args.crystal_repr_outpath,
                         args.full_repr, args.full_repr_names, args.full_repr_outpath,
                         args.symmetry_visualization, args.symmetry_visualization_names, args.symmetry_visualization_outpath, args.quality_assurance,
-                        args.idealize, args.report, args.report_outpath, args.report_names, args.ignore_chains, args.main_id, foldmap, args.output_generated_structure)
+                        args.idealize, args.report, args.report_outpath, args.report_names, args.ignore_chains, args.main_id, foldmap, args.output_generated_structure,
+                        args.output_generated_structure_outpath)
 
 if __name__ == '__main__':
     main()
