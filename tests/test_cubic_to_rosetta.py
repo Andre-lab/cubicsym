@@ -9,8 +9,13 @@ import argparse
 import os
 from unittest import mock
 import pandas as pd
-from cubicsym.private_paths import I, O, T, IP
 from pathlib import Path
+
+
+SYMMETRICAL = Path("/home/shared/databases/SYMMETRICAL")
+I = SYMMETRICAL.joinpath("I").joinpath("unrelaxed/native")
+O = SYMMETRICAL.joinpath("O").joinpath("unrelaxed/native")
+T = SYMMETRICAL.joinpath("T").joinpath("unrelaxed/native")
 
 def test_quality_assurance():
     from scripts.cubic_to_rosetta import quality_assurance
@@ -318,8 +323,89 @@ def test_cubic_to_rosetta_T_foldmap(mock_args):
     from scripts.cubic_to_rosetta import main
     main()
 
-  # # output names
-  #   parser.add_argument('--symmetry_visualization_names', help="Names given to icosahedral files.", default='<prefix>_symmetry_visualization.py', nargs="+", type=str)
+@mock.patch('argparse.ArgumentParser.parse_args',
+            return_value=argparse.Namespace(
+                structures=[str(I.joinpath("7X7M.cif"))],
+                symmetry="I",
+                overwrite=True,
+                rosetta_repr=True,
+                crystal_repr=True,
+                full_repr=True,
+                symmetry_visualization=None,
+                report=False,
+                symdef_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/symdef/native",
+                input_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/input/native",
+                rosetta_repr_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/rosetta_repr/native",
+                crystal_repr_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/crystal_repr/native",
+                full_repr_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/full_repr/native",
+                symmetry_visualization_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/symvis/native",
+                report_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/reports",
+                symdef_names=['<prefix>.symm'],
+                input_names=['<prefix>.cif'],
+                rosetta_repr_names=['<prefix>_rosetta.pdb'],
+                crystal_repr_names=['<prefix>_crystal.pdb'],
+                full_repr_names=['<prefix>_full.cif'],
+                symmetry_visualization_names=['<prefix>_symmetry_visualization.py'],
+                quality_assurance=True,
+                idealize=True,
+                report_names=['<prefix>.csv'],
+                ignore_chains=None,
+                main_id="1",
+                hf1=["1", "2", "3", "4", "5"],
+                hf2=["30", "29", "28", "27", "26"],
+                hf3=["60", "59", "58", "57", "56"],
+                f3=["1", "26", "56"],
+                f21=["1", "60"],
+                f22=["1", "23"],
+                # output_generated_structure=True,
+                output_generated_structure=False,
+                output_generated_structure_outpath=".",
+            ))
+def test_cubic_to_rosetta_7X7M(mock_args):
+    from scripts.cubic_to_rosetta import main
+    main()
+
+@mock.patch('argparse.ArgumentParser.parse_args',
+            return_value=argparse.Namespace(
+                structures=[str(I.joinpath("1YC6.cif"))],
+                symmetry="I",
+                overwrite=True,
+                rosetta_repr=True,
+                crystal_repr=True,
+                full_repr=True,
+                symmetry_visualization=None,
+                report=False,
+                symdef_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/symdef/native",
+                input_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/input/native",
+                rosetta_repr_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/rosetta_repr/native",
+                crystal_repr_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/crystal_repr/native",
+                full_repr_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/full_repr/native",
+                symmetry_visualization_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/symvis/native",
+                report_outpath="/home/shared/databases/SYMMETRICAL/I/unrelaxed/native/../../idealized/reports",
+                symdef_names=['<prefix>.symm'],
+                input_names=['<prefix>.cif'],
+                rosetta_repr_names=['<prefix>_rosetta.pdb'],
+                crystal_repr_names=['<prefix>_crystal.pdb'],
+                full_repr_names=['<prefix>_full.cif'],
+                symmetry_visualization_names=['<prefix>_symmetry_visualization.py'],
+                quality_assurance=True,
+                idealize=True,
+                report_names=['<prefix>.csv'],
+                ignore_chains=None,
+                main_id="1",
+                hf1=["1", "9", "7", "5", "3"],
+                hf2=None,
+                hf3=None,
+                f3=["1", "33", "41"],
+                f21=["1", "43"],
+                f22=["1", "31"],
+                # output_generated_structure=True,
+                output_generated_structure=False,
+                output_generated_structure_outpath=".",
+            ))
+def test_cubic_to_rosetta_1YC6(mock_args):
+    from scripts.cubic_to_rosetta import main
+    main()
 
 def create_test_list(symmetry):
     working = 0

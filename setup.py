@@ -7,6 +7,7 @@ setup(
     scripts=[p for p in map(str,Path("scripts/").rglob("*")) if Path(p).is_file() if "__pycache__" not in  str(p) and "__init__.py" not in  str(p)],
     packages=find_packages(where=".", exclude=("tests",)),
     #packages=['cubicsym'],
+    package_data={'cubicsym' :['data/I/*', 'data/O/*', 'data/T/*']},
     url='https://github.com/Andre-lab/cubicsym',
     license='MIT',
     author='mads',

@@ -529,8 +529,8 @@ class CubicSetup(SymmetrySetup):
         # main 5-fold vectors
         v_5fold_center_to_5fold_master_com = symmetry_setup.get_vrt("VRTHFfold111_z").vrt_orig - symmetry_setup.get_vrt(
             "VRTHFfold1").vrt_orig
-        # v_5fold_center_to_5fold_slave2_com = symmetry_setup.get_vrt_name("VRT5fold1211").vrt_orig - symmetry_setup.get_vrt_name("VRT5fold1").vrt_orig
-        # v_5fold_center_to_5fold_slave5_com = symmetry_setup.get_vrt_name("VRT5fold1511").vrt_orig - symmetry_setup.get_vrt_name("VRT5fold1").vrt_orig
+        # v_5fold_center_to_5fold_slave2_com = symmetry_setup.get_vrt_name("VRTHFfold1211").vrt_orig - symmetry_setup.get_vrt_name("VRTHFfold1").vrt_orig
+        # v_5fold_center_to_5fold_slave5_com = symmetry_setup.get_vrt_name("VRTHFfold1511").vrt_orig - symmetry_setup.get_vrt_name("VRTHFfold1").vrt_orig
 
         # other 5-fold vectors
         v_5fold_center_to_2fold_center = symmetry_setup.get_vrt("VRT2fold1").vrt_orig - symmetry_setup.get_vrt("VRTHFfold1").vrt_orig
@@ -552,7 +552,7 @@ class CubicSetup(SymmetrySetup):
 
         if visualize:
             cmd.do(f"pseudoatom v_5fold_center_to_5fold_master_com, pos={list(v_5fold_center_to_5fold_master_com)}")
-            # cmd.do(f"v_5fold_center_to_5fold_master_com {symmetry_setup.get_vrt_name('VRT5fold1').vrt_orig}, {symmetry_setup.get_vrt_name("VRT5fold1111").vrt_orig})
+            # cmd.do(f"v_5fold_center_to_5fold_master_com {symmetry_setup.get_vrt_name('VRTHFfold1').vrt_orig}, {symmetry_setup.get_vrt_name("VRTHFfold1111").vrt_orig})
             # cmd.do(f"pseudoatom v_5fold_center_to_5fold_slave2_com, pos={list(v_5fold_center_to_5fold_slave2_com)}")
             # cmd.do(f"pseudoatom v_5fold_center_to_5fold_slave5_com, pos={list(v_5fold_center_to_5fold_slave5_com)}")
             cmd.do(f"pseudoatom v_5fold_center_to_2fold_center, pos={list(v_5fold_center_to_2fold_center)}")
@@ -659,58 +659,56 @@ class CubicSetup(SymmetrySetup):
         fold5 = CubicSetup()
         fold5.read_from_file(
             StringIO(textwrap.dedent(f"""symmetry_name 5fold
-          E = 60*VRT5fold1111 + 60*(VRT5fold1111:VRT5fold1211) + 60*(VRT5fold1111:VRT5fold1311)
+          E = 60*VRTHFfold111_sds + 60*(VRTHFfold111_sds:VRTHFfold121_sds) + 60*(VRTHFfold111_sds:VRTHFfold131_sds)
           anchor_residue COM
           virtual_coordinates_start
           {self.get_vrt("VRTglobal")}
-          {self.get_vrt("VRT5fold")}
-          {self.get_vrt("VRT5fold1")}
-          {self.get_vrt("VRT5fold11")}
-          {self.get_vrt("VRT5fold111")}
-          {self.get_vrt("VRT5fold1111")}
-          {self.get_vrt("VRT5fold12")}
-          {self.get_vrt("VRT5fold121")}
-          {self.get_vrt("VRT5fold1211")}
-          {self.get_vrt("VRT5fold13")}
-          {self.get_vrt("VRT5fold131")}
-          {self.get_vrt("VRT5fold1311")}
-          {self.get_vrt("VRT5fold14")}
-          {self.get_vrt("VRT5fold141")}
-          {self.get_vrt("VRT5fold1411")}
-          {self.get_vrt("VRT5fold15")}
-          {self.get_vrt("VRT5fold151")}
-          {self.get_vrt("VRT5fold1511")}
+          {self.get_vrt("VRTHFfold")}
+          {self.get_vrt("VRTHFfold1")}
+          {self.get_vrt("VRTHFfold11")}
+          {self.get_vrt("VRTHFfold111")}
+          {self.get_vrt("VRTHFfold111_sds")}
+          {self.get_vrt("VRTHFfold12")}
+          {self.get_vrt("VRTHFfold121")}
+          {self.get_vrt("VRTHFfold121_sds")}
+          {self.get_vrt("VRTHFfold13")}
+          {self.get_vrt("VRTHFfold131")}
+          {self.get_vrt("VRTHFfold131_sds")}
+          {self.get_vrt("VRTHFfold14")}
+          {self.get_vrt("VRTHFfold141")}
+          {self.get_vrt("VRTHFfold141_sds")}
+          {self.get_vrt("VRTHFfold15")}
+          {self.get_vrt("VRTHFfold151")}
+          {self.get_vrt("VRTHFfold151_sds")}
           virtual_coordinates_stop  
-          connect_virtual JUMP5fold VRTglobal VRT5fold
-          connect_virtual JUMP5fold1 VRT5fold VRT5fold1
-          connect_virtual JUMP5fold11 VRT5fold1 VRT5fold11
-          connect_virtual JUMP5fold111 VRT5fold11 VRT5fold111
-          connect_virtual JUMP5fold1111 VRT5fold111 VRT5fold1111
-          connect_virtual JUMP5fold1111_subunit VRT5fold1111 SUBUNIT
-          connect_virtual JUMP5fold12 VRT5fold1 VRT5fold12
-          connect_virtual JUMP5fold121 VRT5fold12 VRT5fold121
-          connect_virtual JUMP5fold1211 VRT5fold121 VRT5fold1211
-          connect_virtual JUMP5fold1211_subunit VRT5fold1211 SUBUNIT
-          connect_virtual JUMP5fold13 VRT5fold1 VRT5fold13
-          connect_virtual JUMP5fold131 VRT5fold13 VRT5fold131
-          connect_virtual JUMP5fold1311 VRT5fold131 VRT5fold1311
-          connect_virtual JUMP5fold1311_subunit VRT5fold1311 SUBUNIT
-          connect_virtual JUMP5fold14 VRT5fold1 VRT5fold14
-          connect_virtual JUMP5fold141 VRT5fold14 VRT5fold141
-          connect_virtual JUMP5fold1411 VRT5fold141 VRT5fold1411
-          connect_virtual JUMP5fold1411_subunit VRT5fold1411 SUBUNIT
-          connect_virtual JUMP5fold15 VRT5fold1 VRT5fold15
-          connect_virtual JUMP5fold151 VRT5fold15 VRT5fold151
-          connect_virtual JUMP5fold1511 VRT5fold151 VRT5fold1511
-          connect_virtual JUMP5fold1511_subunit VRT5fold1511 SUBUNIT
-          set_dof JUMP5fold1 z({symmetry_setup._dofs['JUMP5fold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1'][1][2]})
-          set_dof JUMP5fold111 x({symmetry_setup._dofs['JUMP5fold111'][0][2]})
-          set_dof JUMP5fold1111 angle_x({symmetry_setup._dofs['JUMP5fold1111'][0][2]}) angle_y({symmetry_setup._dofs['JUMP5fold1111'][1][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1111'][2][2]})
-          set_dof JUMP5fold1111_subunit angle_x({symmetry_setup._dofs['JUMP5fold1111_subunit'][0][2]}) angle_y({symmetry_setup._dofs['JUMP5fold1111_subunit'][1][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1111_subunit'][2][2]})
-          set_jump_group JUMPGROUP1 JUMP5fold1 
-          set_jump_group JUMPGROUP2 JUMP5fold111 JUMP5fold121 JUMP5fold131 JUMP5fold141 JUMP5fold151 
-          set_jump_group JUMPGROUP3 JUMP5fold1111 JUMP5fold1211 JUMP5fold1311 JUMP5fold1411 JUMP5fold1511 
-          set_jump_group JUMPGROUP4 JUMP5fold1111_subunit JUMP5fold1211_subunit JUMP5fold1311_subunit JUMP5fold1411_subunit JUMP5fold1511_subunit 
+          connect_virtual JUMPHFfold VRTglobal VRTHFfold
+          connect_virtual JUMPHFfold1 VRTHFfold VRTHFfold1
+          connect_virtual JUMPHFfold11 VRTHFfold1 VRTHFfold11
+          connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
+          connect_virtual JUMPHFfold1111 VRTHFfold111 VRTHFfold111_sds
+          connect_virtual JUMPHFfold1111_subunit VRTHFfold111_sds SUBUNIT
+          connect_virtual JUMPHFfold12 VRTHFfold1 VRTHFfold12
+          connect_virtual JUMPHFfold121 VRTHFfold12 VRTHFfold121
+          connect_virtual JUMPHFfold1211 VRTHFfold121 VRTHFfold121_sds
+          connect_virtual JUMPHFfold1211_subunit VRTHFfold121_sds SUBUNIT
+          connect_virtual JUMPHFfold13 VRTHFfold1 VRTHFfold13
+          connect_virtual JUMPHFfold131 VRTHFfold13 VRTHFfold131
+          connect_virtual JUMPHFfold1311 VRTHFfold131 VRTHFfold131_sds
+          connect_virtual JUMPHFfold1311_subunit VRTHFfold131_sds SUBUNIT
+          connect_virtual JUMPHFfold14 VRTHFfold1 VRTHFfold14
+          connect_virtual JUMPHFfold141 VRTHFfold14 VRTHFfold141
+          connect_virtual JUMPHFfold1411 VRTHFfold141 VRTHFfold141_sds
+          connect_virtual JUMPHFfold1411_subunit VRTHFfold141_sds SUBUNIT
+          connect_virtual JUMPHFfold15 VRTHFfold1 VRTHFfold15
+          connect_virtual JUMPHFfold151 VRTHFfold15 VRTHFfold151
+          connect_virtual JUMPHFfold1511 VRTHFfold151 VRTHFfold151_sds
+          connect_virtual JUMPHFfold1511_subunit VRTHFfold151_sds SUBUNIT
+          set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMPHFfold1'][0][2]})
+          set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
+          set_dof JUMPHFfold1111 angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]}) angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]}) angle_z({symmetry_setup._dofs['JUMPHFfold111_z'][0][2]})
+          set_jump_group JUMPGROUP1 JUMPHFfold1 
+          set_jump_group JUMPGROUP2 JUMPHFfold111 JUMPHFfold121 JUMPHFfold131 JUMPHFfold141 JUMPHFfold151 
+          set_jump_group JUMPGROUP3 JUMPHFfold1111 JUMPHFfold1211 JUMPHFfold1311 JUMPHFfold1411 JUMPHFfold1511
           """)))
 
         # TODO: change the symmetry so that depending on if it is 4v4m or 1stm different symmetries have to be used
@@ -718,137 +716,134 @@ class CubicSetup(SymmetrySetup):
         fold3 = CubicSetup()
         fold3.read_from_file(
             StringIO(textwrap.dedent(f"""symmetry_name 3fold
-          E = 60*VRT5fold1111 + 60*(VRT5fold1111:VRT3fold1111)
+          E = 60*VRTHFfold111_sds + 60*(VRTHFfold111_sds:VRT3fold111_sds)
           anchor_residue COM
           virtual_coordinates_start
           {self.get_vrt("VRTglobal")}
-          {self.get_vrt("VRT5fold")}
-          {self.get_vrt("VRT5fold1")}
-          {self.get_vrt("VRT5fold11")}
-          {self.get_vrt("VRT5fold111")}
-          {self.get_vrt("VRT5fold1111")}
+          {self.get_vrt("VRTHFfold")}
+          {self.get_vrt("VRTHFfold1")}
+          {self.get_vrt("VRTHFfold11")}
+          {self.get_vrt("VRTHFfold111")}
+          {self.get_vrt("VRTHFfold111_sds")}
           {self.get_vrt("VRT3fold")}
           {self.get_vrt("VRT3fold1")}
           {self.get_vrt("VRT3fold11")}
           {self.get_vrt("VRT3fold111")}
-          {self.get_vrt("VRT3fold1111")}
+          {self.get_vrt("VRT3fold111_sds")}
           {self.get_vrt("VRT2fold")}
           {self.get_vrt("VRT2fold1")}
           {self.get_vrt("VRT2fold12")}
           {self.get_vrt("VRT2fold121")}
-          {self.get_vrt("VRT2fold1211")}
+          {self.get_vrt("VRT2fold121_sds")}
           virtual_coordinates_stop
-          connect_virtual JUMP5fold VRTglobal VRT5fold
-          connect_virtual JUMP5fold1 VRT5fold VRT5fold1
-          connect_virtual JUMP5fold11 VRT5fold1 VRT5fold11
-          connect_virtual JUMP5fold111 VRT5fold11 VRT5fold111
-          connect_virtual JUMP5fold1111 VRT5fold111 VRT5fold1111
-          connect_virtual JUMP5fold1111_subunit VRT5fold1111 SUBUNIT
+          connect_virtual JUMPHFfold VRTglobal VRTHFfold
+          connect_virtual JUMPHFfold1 VRTHFfold VRTHFfold1
+          connect_virtual JUMPHFfold11 VRTHFfold1 VRTHFfold11
+          connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
+          connect_virtual JUMPHFfold1111 VRTHFfold111 VRTHFfold111_sds
+          connect_virtual JUMPHFfold1111_subunit VRTHFfold111_sds SUBUNIT
           connect_virtual JUMP3fold VRTglobal VRT3fold
           connect_virtual JUMP3fold1 VRT3fold VRT3fold1
           connect_virtual JUMP3fold11 VRT3fold1 VRT3fold11
           connect_virtual JUMP3fold111 VRT3fold11 VRT3fold111
-          connect_virtual JUMP3fold1111 VRT3fold111 VRT3fold1111
-          connect_virtual JUMP3fold1111_subunit VRT3fold1111 SUBUNIT
+          connect_virtual JUMP3fold1111 VRT3fold111 VRT3fold111_sds
+          connect_virtual JUMP3fold1111_subunit VRT3fold111_sds SUBUNIT
           connect_virtual JUMP2fold VRTglobal VRT2fold
           connect_virtual JUMP2fold1 VRT2fold VRT2fold1
           connect_virtual JUMP2fold12 VRT2fold1 VRT2fold12
           connect_virtual JUMP2fold121 VRT2fold12 VRT2fold121
-          connect_virtual JUMP2fold1211 VRT2fold121 VRT2fold1211
-          connect_virtual JUMP2fold1211_subunit VRT2fold1211 SUBUNIT
-          set_dof JUMP5fold1 z({symmetry_setup._dofs['JUMP5fold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1'][1][2]})
-          set_dof JUMP5fold111 x({symmetry_setup._dofs['JUMP5fold111'][0][2]})
-          set_dof JUMP5fold1111 angle_x({symmetry_setup._dofs['JUMP5fold1111'][0][2]}) angle_y({symmetry_setup._dofs['JUMP5fold1111'][1][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1111'][2][2]})
-          set_dof JUMP5fold1111_subunit angle_x({symmetry_setup._dofs['JUMP5fold1111_subunit'][0][2]}) angle_y({symmetry_setup._dofs['JUMP5fold1111_subunit'][1][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1111_subunit'][2][2]})
-          set_jump_group JUMPGROUP1 JUMP5fold1 JUMP3fold1 JUMP2fold1
-          set_jump_group JUMPGROUP2 JUMP5fold111 JUMP3fold111  JUMP2fold121
-          set_jump_group JUMPGROUP3 JUMP5fold1111 JUMP3fold1111  JUMP2fold1211
-          set_jump_group JUMPGROUP4 JUMP5fold1111_subunit JUMP3fold1111_subunit JUMP2fold1211_subunit
+          connect_virtual JUMP2fold1211 VRT2fold121 VRT2fold121_sds
+          connect_virtual JUMP2fold1211_subunit VRT2fold121_sds SUBUNIT
+          set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMPHFfold1'][0][2]})
+          set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
+          set_dof JUMPHFfold1111 angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]}) angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
+          set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP3fold1 JUMP2fold1
+          set_jump_group JUMPGROUP2 JUMPHFfold111 JUMP3fold111  JUMP2fold121
+          set_jump_group JUMPGROUP3 JUMPHFfold1111 JUMP3fold1111  JUMP2fold1211
+          set_jump_group JUMPGROUP4 JUMPHFfold1111_subunit JUMP3fold1111_subunit JUMP2fold1211_subunit
           """)))
 
         fold2_1 = CubicSetup()
         fold2_1.read_from_file(
             StringIO(textwrap.dedent(f"""symmetry_name 2fold_1
-          E = 60*VRT5fold1111 + 30*(VRT5fold1111:VRT2fold1111)
+          E = 60*VRTHFfold111_sds + 30*(VRTHFfold111_sds:VRT2fold111_sds)
           anchor_residue COM
           virtual_coordinates_start
           {self.get_vrt("VRTglobal")}
-          {self.get_vrt("VRT5fold")}
-          {self.get_vrt("VRT5fold1")}
-          {self.get_vrt("VRT5fold11")}
-          {self.get_vrt("VRT5fold111")}
-          {self.get_vrt("VRT5fold1111")}
+          {self.get_vrt("VRTHFfold")}
+          {self.get_vrt("VRTHFfold1")}
+          {self.get_vrt("VRTHFfold11")}
+          {self.get_vrt("VRTHFfold111")}
+          {self.get_vrt("VRTHFfold111_sds")}
           {self.get_vrt("VRT2fold")}
           {self.get_vrt("VRT2fold1")}
           {self.get_vrt("VRT2fold11")}
           {self.get_vrt("VRT2fold111")}
-          {self.get_vrt("VRT2fold1111")}
+          {self.get_vrt("VRT2fold111_sds")}
           virtual_coordinates_stop
-          connect_virtual JUMP5fold VRTglobal VRT5fold
-          connect_virtual JUMP5fold1 VRT5fold VRT5fold1
-          connect_virtual JUMP5fold11 VRT5fold1 VRT5fold11
-          connect_virtual JUMP5fold111 VRT5fold11 VRT5fold111
-          connect_virtual JUMP5fold1111 VRT5fold111 VRT5fold1111
-          connect_virtual JUMP5fold1111_subunit VRT5fold1111 SUBUNIT
+          connect_virtual JUMPHFfold VRTglobal VRTHFfold
+          connect_virtual JUMPHFfold1 VRTHFfold VRTHFfold1
+          connect_virtual JUMPHFfold11 VRTHFfold1 VRTHFfold11
+          connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
+          connect_virtual JUMPHFfold1111 VRTHFfold111 VRTHFfold111_sds
+          connect_virtual JUMPHFfold1111_subunit VRTHFfold111_sds SUBUNIT
           connect_virtual JUMP2fold VRTglobal VRT2fold
           connect_virtual JUMP2fold1 VRT2fold VRT2fold1
           connect_virtual JUMP2fold11 VRT2fold1 VRT2fold11
           connect_virtual JUMP2fold111 VRT2fold11 VRT2fold111
-          connect_virtual JUMP2fold1111 VRT2fold111 VRT2fold1111
-          connect_virtual JUMP2fold1111_subunit VRT2fold1111 SUBUNIT
-          set_dof JUMP5fold1 z({symmetry_setup._dofs['JUMP5fold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1'][1][2]})
-          set_dof JUMP5fold111 x({symmetry_setup._dofs['JUMP5fold111'][0][2]})
-          set_dof JUMP5fold1111 angle_x({symmetry_setup._dofs['JUMP5fold1111'][0][2]}) angle_y({symmetry_setup._dofs['JUMP5fold1111'][1][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1111'][2][2]})
-          set_dof JUMP5fold1111_subunit angle_x({symmetry_setup._dofs['JUMP5fold1111_subunit'][0][2]}) angle_y({symmetry_setup._dofs['JUMP5fold1111_subunit'][1][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1111_subunit'][2][2]})
-          set_jump_group JUMPGROUP1 JUMP5fold1 JUMP2fold1
-          set_jump_group JUMPGROUP2 JUMP5fold111 JUMP2fold111 
-          set_jump_group JUMPGROUP3 JUMP5fold1111 JUMP2fold1111 
-          set_jump_group JUMPGROUP4 JUMP5fold1111_subunit JUMP2fold1111_subunit 
+          connect_virtual JUMP2fold1111 VRT2fold111 VRT2fold111_sds
+          connect_virtual JUMP2fold1111_subunit VRT2fold111_sds SUBUNIT
+          set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMPHFfold1'][0][2]})
+          set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
+          set_dof JUMPHFfold1111 angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]}) angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
+          set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP2fold1
+          set_jump_group JUMPGROUP2 JUMPHFfold111 JUMP2fold111 
+          set_jump_group JUMPGROUP3 JUMPHFfold1111 JUMP2fold1111 
+          set_jump_group JUMPGROUP4 JUMPHFfold1111_subunit JUMP2fold1111_subunit 
           """)))
 
         fold2_2 = CubicSetup()
         fold2_2.read_from_file(
             StringIO(textwrap.dedent(f"""symmetry_name fold2_2 
-          E = 60*VRT5fold1111 + 30*(VRT5fold1111:VRT3fold1211)
+          E = 60*VRTHFfold111_sds + 30*(VRTHFfold111_sds:VRT3fold121_sds)
           anchor_residue COM
           virtual_coordinates_start
           {self.get_vrt("VRTglobal")}
-          {self.get_vrt("VRT5fold")}
-          {self.get_vrt("VRT5fold1")}
-          {self.get_vrt("VRT5fold11")}
-          {self.get_vrt("VRT5fold111")}
-          {self.get_vrt("VRT5fold1111")}
+          {self.get_vrt("VRTHFfold")}
+          {self.get_vrt("VRTHFfold1")}
+          {self.get_vrt("VRTHFfold11")}
+          {self.get_vrt("VRTHFfold111")}
+          {self.get_vrt("VRTHFfold111_sds")}
           {self.get_vrt("VRT3fold")}
           {self.get_vrt("VRT3fold1")}
           {self.get_vrt("VRT3fold12")}
           {self.get_vrt("VRT3fold121")}
-          {self.get_vrt("VRT3fold1211")}
+          {self.get_vrt("VRT3fold121_sds")}
           virtual_coordinates_stop
-          connect_virtual JUMP5fold VRTglobal VRT5fold
-          connect_virtual JUMP5fold1 VRT5fold VRT5fold1
-          connect_virtual JUMP5fold11 VRT5fold1 VRT5fold11
-          connect_virtual JUMP5fold111 VRT5fold11 VRT5fold111
-          connect_virtual JUMP5fold1111 VRT5fold111 VRT5fold1111
-          connect_virtual JUMP5fold1111_subunit VRT5fold1111 SUBUNIT
+          connect_virtual JUMPHFfold VRTglobal VRTHFfold
+          connect_virtual JUMPHFfold1 VRTHFfold VRTHFfold1
+          connect_virtual JUMPHFfold11 VRTHFfold1 VRTHFfold11
+          connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
+          connect_virtual JUMPHFfold1111 VRTHFfold111 VRTHFfold111_sds
+          connect_virtual JUMPHFfold1111_subunit VRTHFfold111_sds SUBUNIT
           connect_virtual JUMP3fold VRTglobal VRT3fold
           connect_virtual JUMP3fold1 VRT3fold VRT3fold1
           connect_virtual JUMP3fold12 VRT3fold1 VRT3fold12
           connect_virtual JUMP3fold121 VRT3fold12 VRT3fold121
-          connect_virtual JUMP3fold1211 VRT3fold121 VRT3fold1211
-          connect_virtual JUMP3fold1211_subunit VRT3fold1211 SUBUNIT
-          set_dof JUMP5fold1 z({symmetry_setup._dofs['JUMP5fold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1'][1][2]})
-          set_dof JUMP5fold111 x({symmetry_setup._dofs['JUMP5fold111'][0][2]})
-          set_dof JUMP5fold1111 angle_x({symmetry_setup._dofs['JUMP5fold1111'][0][2]}) angle_y({symmetry_setup._dofs['JUMP5fold1111'][1][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1111'][2][2]})
-          set_dof JUMP5fold1111_subunit angle_x({symmetry_setup._dofs['JUMP5fold1111_subunit'][0][2]}) angle_y({symmetry_setup._dofs['JUMP5fold1111_subunit'][1][2]}) angle_z({symmetry_setup._dofs['JUMP5fold1111_subunit'][2][2]})
-          set_jump_group JUMPGROUP1 JUMP5fold1 JUMP3fold1
-          set_jump_group JUMPGROUP2 JUMP5fold111 JUMP3fold121
-          set_jump_group JUMPGROUP3 JUMP5fold1111 JUMP3fold1211
-          set_jump_group JUMPGROUP4 JUMP5fold1111_subunit JUMP3fold1211_subunit
+          connect_virtual JUMP3fold1211 VRT3fold121 VRT3fold121_sds
+          connect_virtual JUMP3fold1211_subunit VRT3fold121_sds SUBUNIT
+          set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMPHFfold1'][0][2]})
+          set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
+          set_dof JUMPHFfold1111 angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]}) angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
+          set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP3fold1
+          set_jump_group JUMPGROUP2 JUMPHFfold111 JUMP3fold121
+          set_jump_group JUMPGROUP3 JUMPHFfold1111 JUMP3fold1211
+          set_jump_group JUMPGROUP4 JUMPHFfold1111_subunit JUMP3fold1211_subunit
           """)))
 
         # setup_3fold = SymmetrySetup("3fold")
         # vrtglobal = symmetry_setup.get_vrt_name("VRTglobal")
-        # center_of_3fold = np.array([symmetry_setup.get_vrt_name(vrt).vrt_orig for vrt in ("VRT5fold1111", "VRT3fold1111", "VRT2fold1111")]).sum(axis=1) / 3
+        # center_of_3fold = np.array([symmetry_setup.get_vrt_name(vrt).vrt_orig for vrt in ("VRTHFfold1111", "VRT3fold1111", "VRT2fold1111")]).sum(axis=1) / 3
         # rotation_to_3fold = rotation_matrix_from_vector_to_vector(vrtglobal.vrt_orig, center_of_3fold)
         # vrt3fold = copy.deepcopy(vrtglobal).rotate(rotation_to_3fold)
 
