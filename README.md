@@ -73,7 +73,7 @@ In case the automatic way fails, one can use the manual way. When using the manu
 * --f21 
 * --f22
 
-'hf' stands for highest fold which corresponds to the highest symmetrical fold for the system which for an icosahedral structure is the 5-fold, for the octahedral structure the 4-fold and for the tetrahedral structure the 3-fold. 'f3' stands for the 3-fold (which all cubic structures have) and f21 and f22 the two 2-folds. Subunit numbers should be given to each of these options to determine the symmetry as they are assigned to by the script. To see the subunit numbers, first run the script with the flag: --output_generated_structure. This will generate an output file of the full biological assembly. Look at the output in a structural program (like PyMOL or Chimera) and from it assign the subunit numbers to the options. These numbers should always be related to the main subunit.
+'hf' stands for highest fold which corresponds to the highest symmetrical fold for the system which for an icosahedral structure is the 5-fold, for the octahedral structure the 4-fold and for the tetrahedral structure the 3-fold. 'f3' stands for the 3-fold (which all cubic structures have) and f21 and f22 the two 2-folds. Subunit numbers are parsed to each of these options to determine the symmetry as they are assigned to by the script. To see the subunit numbers, first run the script with the flag: --output_generated_structure. This will generate an output file of the full biological assembly. Look at the output in a structural program (like PyMOL or Chimera) and from it assign the subunit numbers to the options. These numbers should always be related to the main subunit.
 
 A test to create an output structure to assign subunit numbers from can be run with:
 
