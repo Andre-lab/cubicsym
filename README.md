@@ -7,7 +7,7 @@ It can be used as a library but also contains import scripts for 2 purposes:
 
 # Installation
 
-**This package is installed alongside EvoDOCK**
+**NOTE: This package is installed alongside EvoDOCK!**
 
 For a standalone install the following must be installed: 
 * MAFFT (https://mafft.cbrc.jp/alignment/software/) (can be installed with Anaconda/brew/apt)
