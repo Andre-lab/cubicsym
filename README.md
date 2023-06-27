@@ -78,7 +78,7 @@ The usage of the script is well documented. Use `python cubic_form_rosetta.py --
 A basic test can be run with
 
 ```console
-python scripts/cubic_from_rosetta.py --structures tests/outputs/1stm_rosetta.pdb --symmetry_files tests/outputs/1stm.symm -o tests/outputs/
+python scripts/cubic_from_rosetta.py --structures tests/outputs/1stm_rosetta.pdb --symmetry_files tests/outputs/1stm.symm -o tests/outputs/ --overwrite
 ```
 
 
