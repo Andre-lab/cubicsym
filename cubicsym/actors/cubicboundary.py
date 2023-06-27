@@ -9,7 +9,8 @@ from copy import deepcopy
 import math
 from pyrosetta.rosetta.core.id import AtomID
 from pyrosetta.rosetta.core.scoring.constraints import AngleConstraint, AtomPairConstraint, BoundFunc, DihedralConstraint
-from pyrosetta.rosetta.protocols.rigid import RigidBodyDofAdaptiveMover
+# from pyrosetta.rosetta.protocols.rigid import RigidBodyDofAdaptiveMover
+from cubicsym.actors.rigidbodydofadaptivemover import RigidBodyDofAdaptiveMover
 from pyrosetta.rosetta.core.scoring.func import SquareWellFunc
 from pyrosetta.rosetta.core.pose.symmetry import sym_dof_jump_num
 from pyrosetta.rosetta.numeric import dihedral_radians
