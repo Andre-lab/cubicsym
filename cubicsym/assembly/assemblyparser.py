@@ -90,7 +90,8 @@ class AssemblyParser:
         setup.read_from_file(symmetry_file)
 
         # read rosetta pdb file from file
-        fsuffix = Path(file).suffix
+        # if isinstance(file, StringIO)
+        fsuffix = Path(assembly_name).suffix
         assert fsuffix in (".cif", ".pdb"), f"File has to have either extension '.cif' of '.pdb' not {fsuffix}"
         if fsuffix == ".cif":
             p = MMCIFParser()
@@ -115,9 +116,17 @@ class AssemblyParser:
 
         # The 3 5-fold axes availble for an icosahedral structure in the symmetry file
         # minus because rosetta is awesome and have turned the coordinate systems arounD
-        z15 = -setup.get_vrt("VRTHFfold")._vrt_z
-        z25 = -setup.get_vrt("VRT2fold")._vrt_z
-        z35 = -setup.get_vrt("VRT3fold")._vrt_z
+        # backward compatability:
+        try:
+            setup.get_vrt("VRTHFfold")
+        except ValueError:
+            z15 = -setup.get_vrt("VRT5fold")._vrt_z
+            z25 = -setup.get_vrt("VRT2fold")._vrt_z
+            z35 = -setup.get_vrt("VRT3fold")._vrt_z
+        else:
+            z15 = -setup.get_vrt("VRTHFfold")._vrt_z
+            z25 = -setup.get_vrt("VRT2fold")._vrt_z
+            z35 = -setup.get_vrt("VRT3fold")._vrt_z
 
         # construct assembly
         assembly = Assembly()

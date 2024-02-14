@@ -30,11 +30,12 @@ from Bio.PDB.Polypeptide import is_aa, three_to_one
 from Bio.PDB.Structure import Structure
 from Bio.PDB.vectors import Vector
 from cubicsym.mathfunctions import distance, vector
+from Bio.PDB import Chain
 
 class Assembly(Structure):
     """A class build on top of the Structure class in BioPython"""
 
-    def __init__(self, mmcif=None, assembly_id=None, id_="1", rosetta_units=None, ignore_chains=None):
+    def __init__(self, mmcif=None, assembly_id=None, id_="1", rosetta_units=None, ignore_chains=None, use_full=False, model_together=False):
         """Creates an Assembly object from a mmcif file and the assembly id
 
         :param mmcif: MMCIF File to create the Assembly from.
@@ -42,6 +43,7 @@ class Assembly(Structure):
         :param id_: The BioPython id given to the assembly
         :param pdb: PDB file to create the assembly from.
         :param ignore_chains: Will ignore these chains in the input structure
+        :param use_full: Will not construct from the symmetry operations but from the full struture instead
         """
         super().__init__(id_)
         self.cmd = xmlrpclib.ServerProxy('http://localhost:9123')
@@ -50,8 +52,10 @@ class Assembly(Structure):
         self.rosetta_asymmetric_units = rosetta_units
         self.ignore_chains = ignore_chains
         self.chain_ids = iter(list(ascii_uppercase) + list(ascii_lowercase) + [str(i) for i in range(0, 10000)])
+        self.use_full = use_full
+        self.model_together = model_together
         if mmcif and assembly_id:
-            self.from_mmcif(mmcif)
+            self.from_mmcif(mmcif, model_together=model_together)
             # chain name and subunit number specifiers
         # if pdb and not assembly_id:
         #     self.from_pdb(pdb)
@@ -70,50 +74,96 @@ class Assembly(Structure):
     #     # now we check if the assembly is valid and return if it is:
     #     self._create_sequence_alignment_map()
 
-    def get_model(self, mmcif_file):
-        """Retrieves the model from the mmcif_file"""
+    def get_structure(self, mmcif_file):
         for subunit in self.get_subunits():
             self.detach_child(subunit.id)
         structure_name = Path(mmcif_file).stem
         structure = MMCIFParser().get_structure(structure_name, mmcif_file)
         model = structure[0] # only work with the first model (handles NMR in this case)
+        return model
+
+    def get_model(self, model, mmcif_file):
+        """Retrieves the model from the mmcif_file"""
         mmcif_dict = MMCIF2Dict(mmcif_file)
         model = self._reconstruct(mmcif_dict, model) # reconstruct the model so the chain names are easier to handle
         return model, mmcif_dict
+
 
     def get_struct_assembly_details(self, mmcif_dict):
         """get the _pdbx_struct_assembly.details details from the assembly id"""
         return mmcif_dict["_pdbx_struct_assembly.details"][self.allowed_ids.index(self.assembly_id)]
 
-    def from_mmcif(self, file, center=True):
+    def __concatenate_chains(self, chain_list):
+        """
+        Concatenates a list of Bio.PDB.Chain.Chain objects into a single chain.
+
+        Args:
+        chain_list (list of Bio.PDB.Chain.Chain): List of chain objects to concatenate.
+
+        Returns:
+        Bio.PDB.Chain.Chain: A new chain containing all residues from the input chains.
+        """
+        # Create a new Chain object
+        new_chain = Chain.Chain("X")  # "X" is an arbitrary ID for the new chain
+
+        # Unique residue ID counter
+        residue_id = 1
+
+        for chain in chain_list:
+            for residue in chain:
+                # Copy the residue (to avoid altering the original chain)
+                new_residue = residue.copy()
+                # Update the id to a unique value
+                new_residue.id = (" ", residue_id, " ")
+                # Add the new residue to the chain
+                new_chain.add(new_residue)
+                residue_id += 1
+
+        return new_chain
+
+    def from_mmcif(self, file, center=True, model_together=False):
         """Constructs an assembly from a mmcif file."""
         start_time = time.time()
-        model, mmcif_dict = self.get_model(file)
-        self.allowed_ids = mmcif_dict["_pdbx_struct_assembly.id"]
-        if self.assembly_id not in self.allowed_ids:
-            msg = f"The assembly id {self.assembly_id} is not found in {file}. The available assembly ids are {', '.join(self.allowed_ids)}"
-            raise ValueError(msg)
-        print("Generating assembly: id=" + self.assembly_id + " type='" + self.get_struct_assembly_details(mmcif_dict) + "'")
-        rotations_list, translations_list, model_chains_list = self._get_symmetry_operations(mmcif_dict, model)
-        subunit_number = 0
-        if len(rotations_list) == 0 and len(translations_list) == 0:
-            rotations_list.append([np.identity(3)])
-            translations_list.append([np.zeros(3)])
-            model_chains_list.append([list(model.get_chains())])
-        for rotations, translations, model_chains in zip(rotations_list, translations_list, model_chains_list):
-            for model_chain in model_chains:
-                for symmetry_operation_number, (r, t) in enumerate(zip(rotations, translations), 1):
-                    print("applying symmetry operation " + str(symmetry_operation_number) + "/" + str(len(rotations)))
-                    subunit_number += 1
-                    subunit = Bio.PDB.Model.Model(f"{subunit_number}")
-                    new_chain = model_chain.copy()
-                    # new_chain.transform(r,t) - problem is that it right multiplies!
-                    for atom in new_chain.get_atoms():
-                        atom.coord = np.dot(r, atom.coord) + t
-                    new_chain.id = next(self.chain_ids)
-                    subunit.add(new_chain) # todo: You could add directly with self.add but this is a legacy behavior where some code would needed to be un-entagnled to work
-                    self.add(subunit)
-            # now we check if the assembly is valid and return if it is:
+        model = self.get_structure(mmcif_file=file)
+        if self.use_full:
+            subunit_number = 0
+            for new_chain in model.get_chains():
+                subunit_number += 1
+                subunit = Bio.PDB.Model.Model(f"{subunit_number}")
+                # new_chain.id = next(self.chain_ids)
+                subunit.add(new_chain)  # todo: You could add directly with self.add but this is a legacy behavior where some code would needed to be un-entagnled to work
+                self.add(subunit)
+        else:
+            model, mmcif_dict = self.get_model(model, file)
+            self.allowed_ids = mmcif_dict["_pdbx_struct_assembly.id"]
+            if self.assembly_id not in self.allowed_ids:
+                msg = f"The assembly id {self.assembly_id} is not found in {file}. The available assembly ids are {', '.join(self.allowed_ids)}"
+                raise ValueError(msg)
+            print("Generating assembly: id=" + self.assembly_id + " type='" + self.get_struct_assembly_details(mmcif_dict) + "'")
+            rotations_list, translations_list, model_chains_list = self._get_symmetry_operations(mmcif_dict, model)
+            subunit_number = 0
+            if len(rotations_list) == 0 and len(translations_list) == 0:
+                rotations_list.append([np.identity(3)])
+                translations_list.append([np.zeros(3)])
+                model_chains_list.append([list(model.get_chains())])
+            for rotations, translations, model_chains in zip(rotations_list, translations_list, model_chains_list):
+                # model together
+                if model_together:
+                    # This only works if the addition of all the asymmetric units is will be equal to 12, 24 or 60 subunits
+                    model_chains = [self.__concatenate_chains(model_chains)]
+                for model_chain in model_chains:
+                    for symmetry_operation_number, (r, t) in enumerate(zip(rotations, translations), 1):
+                        print("applying symmetry operation " + str(symmetry_operation_number) + "/" + str(len(rotations)))
+                        subunit_number += 1
+                        subunit = Bio.PDB.Model.Model(f"{subunit_number}")
+                        new_chain = model_chain.copy()
+                        # new_chain.transform(r,t) - problem is that it right multiplies!
+                        for atom in new_chain.get_atoms():
+                            atom.coord = np.dot(r, atom.coord) + t
+                        new_chain.id = next(self.chain_ids)
+                        subunit.add(new_chain) # todo: You could add directly with self.add but this is a legacy behavior where some code would needed to be un-entagnled to work
+                        self.add(subunit)
+                # now we check if the assembly is valid and return if it is:
         self._create_sequence_alignment_map()
         if center:
             self.center()
@@ -216,7 +266,7 @@ class Assembly(Structure):
     @staticmethod
     def _get_rosetta_chain_ordering():
         """Returns the chain ordering Rosetta used as an iterable including extra numbers. This is the chain ordering Rosetta
-        applies according to src.basic.pymol_chains.hh. I have added extra 10000 numbers to increase the iter so
+        applies according to source.basic.pymol_chains.hh. I have added extra 10000 numbers to increase the iter so
         as to not run out of chain labels."""
         rosetta_chain_ordering = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz!@#$&.<>?]|-_\\~=%")
         extra_chains = list(map(str, range(10, 10000)))
