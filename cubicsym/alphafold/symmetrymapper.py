@@ -26,20 +26,19 @@ from pyrosetta.rosetta.core.pose.symmetry import extract_asymmetric_unit
 
 class SymmetryMapper:
     """Finds the chain combination that produces the best overlap with predicted AlphaFold structure,
-    when using the options the -a -i in make_symdef_file.pl
+    when using the options -a -i in make_symdef_file.pl
 
-    The documention and options for make_symmdef_file.pl is here:
+    The documentation and options for make_symmdef_file.pl is here:
     https://www.rosettacommons.org/docs/latest/application_documentation/utilities/make-symmdef-file
     """
 
-    def __init__(self, rosetta_path="/home/mads/Rosetta_release"):
+    def __init__(self):
         """Initialize class.
 
         :param rosetta_path: Path to the Rosetta folder.
         :param flip_from_first_apply: Sets the flip direction based on the first structure that is parsed to the
         """
-        self.rosetta_path = rosetta_path
-        self.make_symdef_file_path = f"{self.rosetta_path}/main/source/src/apps/public/symmetry/make_symmdef_file.pl"
+        self.make_symdef_file_path = str(Path(__file__).resolve().parent.parent.parent.joinpath("scripts/make_symmdef_file.pl"))
         self.tmp_file_dir = tempfile.gettempdir()
         self.matcher = Matcher()
 
@@ -198,32 +197,37 @@ class SymmetryMapper:
             out, err = sp.communicate()
             out, err = out.decode(), err.decode()
 
-            # system_center = list(map(float, err.split("\n")[4].split()[-3:]))
-
             # construct the best combination pose from the outout of the make_symdef_file.sh script
-            ss_cn = SymmetrySetup(file=StringIO(out))
-            pose_sym = pose_from_file(f"{tmp_id}_INPUT.pdb")
-            ss_cn.make_symmetric_pose(pose_sym)
+            chain_used = main_str
+            cs, input_pose, input_pose_flip, input_pose_asym, input_pose_flip_asym, x_trans = self.construct_from_symmetry(StringIO(out), f"{tmp_id}_INPUT.pdb", cn, symmetry, T3F)
+            return cs, input_pose, input_pose_flip, input_pose_asym, input_pose_flip_asym, x_trans, chain_used
 
-            # align the and gets it cubic symmetry setup
-            cs, x_axis, y_axis, z_axis = self.align_pose_along_fold(pose_sym, str(cn), symmetry, ss_cn, T3F)
+    def construct_from_symmetry(self, symmetry_file, input_file, cn, symmetry, T3F):
+        """Constructs cubic symmetry from cn symmetry file and input file"""
+        ss_cn = SymmetrySetup(file=symmetry_file)
+        pose_sym = pose_from_file(input_file)
+        ss_cn.make_symmetric_pose(pose_sym)
 
-            # center chain A on anchor resi
-            input_pose = Pose()
-            extract_asymmetric_unit(pose_sym, input_pose, False)
-            input_pose.pdb_info().set_chains("A")
-            anchor_xyz = np.array(input_pose.residue(residue_center_of_mass(input_pose.conformation(), 1, input_pose.chain_end(1))).atom("CA").xyz())
-            self.center_pose_based_on_anchor(input_pose, anchor_xyz)
-            # now create one that is flipped around z
-            input_pose_flip = input_pose.clone()
-            self.do_a_180_around_axis(input_pose_flip, x_axis)
-            input_pose, input_pose_flip = self.correct_flip(input_pose, input_pose_flip, x_axis, y_axis, z_axis)
-            input_pose_asym = input_pose.clone()
-            input_pose_flip_asym = input_pose_flip.clone()
-            cs.make_symmetric_pose(input_pose)
-            cs.make_symmetric_pose(input_pose_flip)
+        # align the and gets it cubic symmetry setup
+        cs, x_axis, y_axis, z_axis = self.align_pose_along_fold(pose_sym, str(cn), symmetry, ss_cn, T3F)
 
-            return cs, input_pose, input_pose_flip, input_pose_asym, input_pose_flip_asym, self.get_x_trans(anchor_xyz, z_axis), main_str
+        # center chain A on anchor resi
+        input_pose = Pose()
+        extract_asymmetric_unit(pose_sym, input_pose, False)
+        input_pose.pdb_info().set_chains("A")
+        anchor_xyz = np.array(
+            input_pose.residue(residue_center_of_mass(input_pose.conformation(), 1, input_pose.chain_end(1))).atom(
+                "CA").xyz())
+        self.center_pose_based_on_anchor(input_pose, anchor_xyz)
+        # now create one that is flipped around z
+        input_pose_flip = input_pose.clone()
+        self.do_a_180_around_axis(input_pose_flip, x_axis)
+        input_pose, input_pose_flip = self.correct_flip(input_pose, input_pose_flip, x_axis, y_axis, z_axis)
+        input_pose_asym = input_pose.clone()
+        input_pose_flip_asym = input_pose_flip.clone()
+        cs.make_symmetric_pose(input_pose)
+        cs.make_symmetric_pose(input_pose_flip)
+        return cs, input_pose, input_pose_flip, input_pose_asym, input_pose_flip_asym, self.get_x_trans(anchor_xyz, z_axis)
 
     def correct_flip(self, input_pose, input_pose_flip, x_axis, y_axis, z_axis):
         """Makes sure the poses labelled as 'flipped' stays consistent. A pose is labelled as 'flipped' if its N-termini CA atom is
@@ -246,10 +250,8 @@ class SymmetryMapper:
         #     if dof == "x" and doftype == "translation":
         #         return val
 
-    def align_pose_along_fold(self, pose: Pose, cn:str, symmetry:str, ss_cn: SymmetrySetup, T3F):
-        # get the symmetry axis vrt
-        vrt0 = ss_cn.get_vrt("VRT0")._vrt_orig
-        current_z_axis = ss_cn.get_vrt("VRT0")._vrt_z
+    @staticmethod
+    def get_fold_and_vrt_id(symmetry, cn, T3F=False):
         if symmetry == "I":
             if cn == "5":
                 fold, vrt_id = "HF", "HF"
@@ -272,6 +274,13 @@ class SymmetryMapper:
                     fold, vrt_id = "HF", "HF"
             elif cn == "2":
                 fold, vrt_id = "2F", "21"
+        return fold, vrt_id
+
+    def align_pose_along_fold(self, pose: Pose, cn:str, symmetry:str, ss_cn: SymmetrySetup, T3F):
+        # get the symmetry axis vrt
+        vrt0 = ss_cn.get_vrt("VRT0")._vrt_orig
+        fold, vrt_id = self.get_fold_and_vrt_id(symmetry, cn, T3F)
+        current_z_axis = ss_cn.get_vrt("VRT0")._vrt_z
         return self._alignment_subroutine(pose, symmetry, current_z_axis, fold, vrt_id)
 
     def _alignment_subroutine(self, pose, symmetry, current_z_axis, fold, vrt_id):
@@ -299,6 +308,7 @@ class SymmetryMapper:
     def find_combos(self, pose, cn, return_df=False, main_chains_allowed=None, check_for_point_symmetry=False):
         """Finds the best chain combination (see class documentation) for a given cn symmetry. There's an option to return a
         pandas DateFrame containing all information gathered throughout the selection."""
+        print(f"Using the symmetry script defined here: {self.make_symdef_file_path}")
         tmp_file = f"{self.tmp_file_dir}/{uuid.uuid4()}.pdb"
         pose.dump_pdb(tmp_file)  # write pose to tmp_file
         combo_info = {"combo": [], "success": [], "tmscore": [], "total_rmsd": [], "chain_matches_int": [],
