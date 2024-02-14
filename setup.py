@@ -4,7 +4,7 @@ from pathlib import Path
 setup(
     name='cubicsym',
     version='0.1',
-    scripts=[p for p in map(str,Path("scripts/").rglob("*")) if Path(p).is_file() if "__pycache__" not in  str(p) and "__init__.py" not in  str(p)],
+    scripts=[p for p in map(str,Path("scripts/").rglob("*")) if Path(p).is_file() if "__pycache__" not in  str(p) and "__init__.py" not in  str(p)] + ["scripts/make_symmdef_file.pl"],
     packages=find_packages(where=".", exclude=("tests",)),
     #packages=['cubicsym'],
     package_data={'cubicsym' :['data/I/*', 'data/O/*', 'data/T/*']},
