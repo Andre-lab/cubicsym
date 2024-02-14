@@ -6,6 +6,7 @@ CubicSetut class
 @Date: 9/21/22
 """
 from symmetryhandler.symmetrysetup import SymmetrySetup
+from symmetryhandler.mathfunctions import rotate
 import numpy as np
 import copy
 from io import StringIO
@@ -36,6 +37,8 @@ class CubicSetup(SymmetrySetup):
         super().__init__(symdef, pose, symmetry_name)
         self.chain_map_str2int = {k: v for k, v in zip(tuple("ABCDEFGHI"), tuple(range(1, 10)))}
         self.extract_headers()
+
+
 
     def read_from_pose(self, pose):
         raise NotImplementedError
@@ -87,6 +90,10 @@ class CubicSetup(SymmetrySetup):
             assert np.isclose(anchor_pos, sds_pos, atol).all()
         except AssertionError:
             raise AssertionError(f"The anchor residue coordinates is {anchor_pos}, but should be be overlayed with VRT{jid}fold111_sds at {sds_pos}")
+
+    @staticmethod
+    def is_fully_protected(pose):
+        return pose.num_chains() == 16 + 1
 
     @staticmethod
     def get_norm_symdef_path(symmetry, fold):
@@ -175,7 +182,7 @@ class CubicSetup(SymmetrySetup):
         # 1. map  chains to eachother
         if use_map is not None:
             pose_mapping = use_map
-            assert len(use_map) in (7, 8, 9) #must have enough chains
+            assert len(use_map) in (7, 8, 9) # must have enough chains
         else:
             pose_mapping = self.construct_chain_match_to_hf(same_handedness=same_handedness)
         # 2. map residues to eachtother taking into account the sequence alignment
@@ -250,22 +257,23 @@ class CubicSetup(SymmetrySetup):
     #         m[resi] = resi_ref
     #     return m
 
-    def calpha_superimpose_pose_hf_map(self, pose, pose_ref, same_handedness=True):
-        """Aligns a cubic symmetrical pose onto another pose_ref taking the correct chain mapping into account. It removes the symetry
-        and creates a new asymmetrical pose with reordered chains so that it matches the ordering in pose_ref. It returns the aligned pose."""
-        # lets reconstruct the chains
-        pose_chains = self.construct_chain_match_to_hf(same_handedness=same_handedness)
-        pose.dump_pdb("/tmp/pose_from.pdb")
-        pose_ref.dump_pdb("/tmp/pose_to.pdb")
-        pose_from = pose_from_file("/tmp/pose_from.pdb")
-        pose_to = pose_from_file("/tmp/pose_to.pdb")
-        split_chains = list(pose_from.split_by_chain())  # [np.array(pose_chains) - 1]
-        chains_in_new_order = [split_chains[i - 1] for i in pose_chains]
-        pose_from_new = chains_in_new_order[0]
-        for n, chain in enumerate(chains_in_new_order[1:], 1):
-            pose_from_new.append_pose_by_jump(chain, pose_from_new.chain_end(n))
-        calpha_superimpose_pose(pose_from_new, pose_to)
-        return pose_from_new
+    # fixme: Delete as it is unused
+    # def calpha_superimpose_pose_hf_map(self, pose, pose_ref, same_handedness=True):
+    #     """Aligns a cubic symmetrical pose onto another pose_ref taking the correct chain mapping into account. It removes the symetry
+    #     and creates a new asymmetrical pose with reordered chains so that it matches the ordering in pose_ref. It returns the aligned pose."""
+    #     # lets reconstruct the chains
+    #     pose_chains = self.construct_chain_match_to_hf(same_handedness=same_handedness)
+    #     pose.dump_pdb("/tmp/pose_from.pdb")
+    #     pose_ref.dump_pdb("/tmp/pose_to.pdb")
+    #     pose_from = pose_from_file("/tmp/pose_from.pdb")
+    #     pose_to = pose_from_file("/tmp/pose_to.pdb")
+    #     split_chains = list(pose_from.split_by_chain())  # [np.array(pose_chains) - 1]
+    #     chains_in_new_order = [split_chains[i - 1] for i in pose_chains]
+    #     pose_from_new = chains_in_new_order[0]
+    #     for n, chain in enumerate(chains_in_new_order[1:], 1):
+    #         pose_from_new.append_pose_by_jump(chain, pose_from_new.chain_end(n))
+    #     calpha_superimpose_pose(pose_from_new, pose_to)
+    #     return pose_from_new
 
     def get_register_shift_angle(self):
         sym = self.cubic_symmetry()
@@ -408,6 +416,11 @@ class CubicSetup(SymmetrySetup):
         furthest = cut_all_but_chains(pose.clone(), *self.get_2fold_chain_ids()[1])
         return closest, furthest
 
+    @staticmethod
+    def get_pose_with_chains(pose, *chains):
+        """Get a new instance of a pose with the chains only."""
+        return cut_all_but_chains(pose.clone(), *chains)
+
     def __get_chains_ids(self, ids, rosetta_number):
         if rosetta_number:
             return tuple([self.chain_map_str2int[i] for i in ids])
@@ -453,6 +466,12 @@ class CubicSetup(SymmetrySetup):
        else:
            raise ValueError("Symmetry is not cubic!")
 
+    def is_cubic(self):
+        if any((e in self.energies for e in ("60*", "24*", "12*"))):
+            if self.is_hf_based() or self.is_3f_based() or self.is_2f_based():
+                return True
+        return False
+
     def cubic_symmetry(self):
         """Determine the cubic symmetry from a SymmetrySetup object."""
         if "60*" in self.energies:
@@ -479,7 +498,9 @@ class CubicSetup(SymmetrySetup):
     @staticmethod
     def cubic_symmetry_from_pose(pose):
         nsubs = pose.conformation().Symmetry_Info().subunits()
-        if nsubs == 9:
+        if nsubs == 16:
+            return "I"
+        elif nsubs == 9:
             return "I"
         elif nsubs == 8:
             return "O"
@@ -650,6 +671,7 @@ class CubicSetup(SymmetrySetup):
 
         return chain1_2, chain1_3
 
+
     def create_independent_icosahedral_symmetries(self, pose):
         """Creates independent symmetries for the icosahedral 5-fold, 3-fold and two 2-folds."""
         symmetry_setup = copy.deepcopy(self)
@@ -659,56 +681,138 @@ class CubicSetup(SymmetrySetup):
         fold5 = CubicSetup()
         fold5.read_from_file(
             StringIO(textwrap.dedent(f"""symmetry_name 5fold
-          E = 60*VRTHFfold111_sds + 60*(VRTHFfold111_sds:VRTHFfold121_sds) + 60*(VRTHFfold111_sds:VRTHFfold131_sds)
-          anchor_residue COM
-          virtual_coordinates_start
-          {self.get_vrt("VRTglobal")}
-          {self.get_vrt("VRTHFfold")}
-          {self.get_vrt("VRTHFfold1")}
-          {self.get_vrt("VRTHFfold11")}
-          {self.get_vrt("VRTHFfold111")}
-          {self.get_vrt("VRTHFfold111_sds")}
-          {self.get_vrt("VRTHFfold12")}
-          {self.get_vrt("VRTHFfold121")}
-          {self.get_vrt("VRTHFfold121_sds")}
-          {self.get_vrt("VRTHFfold13")}
-          {self.get_vrt("VRTHFfold131")}
-          {self.get_vrt("VRTHFfold131_sds")}
-          {self.get_vrt("VRTHFfold14")}
-          {self.get_vrt("VRTHFfold141")}
-          {self.get_vrt("VRTHFfold141_sds")}
-          {self.get_vrt("VRTHFfold15")}
-          {self.get_vrt("VRTHFfold151")}
-          {self.get_vrt("VRTHFfold151_sds")}
-          virtual_coordinates_stop  
-          connect_virtual JUMPHFfold VRTglobal VRTHFfold
-          connect_virtual JUMPHFfold1 VRTHFfold VRTHFfold1
-          connect_virtual JUMPHFfold11 VRTHFfold1 VRTHFfold11
-          connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
-          connect_virtual JUMPHFfold1111 VRTHFfold111 VRTHFfold111_sds
-          connect_virtual JUMPHFfold1111_subunit VRTHFfold111_sds SUBUNIT
-          connect_virtual JUMPHFfold12 VRTHFfold1 VRTHFfold12
-          connect_virtual JUMPHFfold121 VRTHFfold12 VRTHFfold121
-          connect_virtual JUMPHFfold1211 VRTHFfold121 VRTHFfold121_sds
-          connect_virtual JUMPHFfold1211_subunit VRTHFfold121_sds SUBUNIT
-          connect_virtual JUMPHFfold13 VRTHFfold1 VRTHFfold13
-          connect_virtual JUMPHFfold131 VRTHFfold13 VRTHFfold131
-          connect_virtual JUMPHFfold1311 VRTHFfold131 VRTHFfold131_sds
-          connect_virtual JUMPHFfold1311_subunit VRTHFfold131_sds SUBUNIT
-          connect_virtual JUMPHFfold14 VRTHFfold1 VRTHFfold14
-          connect_virtual JUMPHFfold141 VRTHFfold14 VRTHFfold141
-          connect_virtual JUMPHFfold1411 VRTHFfold141 VRTHFfold141_sds
-          connect_virtual JUMPHFfold1411_subunit VRTHFfold141_sds SUBUNIT
-          connect_virtual JUMPHFfold15 VRTHFfold1 VRTHFfold15
-          connect_virtual JUMPHFfold151 VRTHFfold15 VRTHFfold151
-          connect_virtual JUMPHFfold1511 VRTHFfold151 VRTHFfold151_sds
-          connect_virtual JUMPHFfold1511_subunit VRTHFfold151_sds SUBUNIT
-          set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMPHFfold1'][0][2]})
-          set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
-          set_dof JUMPHFfold1111 angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]}) angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]}) angle_z({symmetry_setup._dofs['JUMPHFfold111_z'][0][2]})
-          set_jump_group JUMPGROUP1 JUMPHFfold1 
-          set_jump_group JUMPGROUP2 JUMPHFfold111 JUMPHFfold121 JUMPHFfold131 JUMPHFfold141 JUMPHFfold151 
-          set_jump_group JUMPGROUP3 JUMPHFfold1111 JUMPHFfold1211 JUMPHFfold1311 JUMPHFfold1411 JUMPHFfold1511
+                      E = 5*VRTHFfold111_sds + 5*(VRTHFfold111_sds:VRTHFfold121_sds) + 5*(VRTHFfold111_sds:VRTHFfold131_sds)
+                      anchor_residue COM
+                      virtual_coordinates_start
+            {self.get_vrt("VRTglobal")}
+            {self.get_vrt("VRTHFfold1_z_tref")}
+            {self.get_vrt("VRTHFfold")}
+            {self.get_vrt("VRTHFfold1")}
+            {self.get_vrt("VRTHFfold1_z_rref")}
+            {self.get_vrt("VRTHFfold1_z")}
+            {self.get_vrt("VRTHFfold111_x_tref")}
+            {self.get_vrt("VRTHFfold11")}
+            {self.get_vrt("VRTHFfold111")}
+            {self.get_vrt("VRTHFfold111_x_rref")}
+            {self.get_vrt("VRTHFfold111_x")}
+            {self.get_vrt("VRTHFfold111_y_rref")}
+            {self.get_vrt("VRTHFfold111_y")}
+            {self.get_vrt("VRTHFfold111_z_rref")}
+            {self.get_vrt("VRTHFfold111_z")}
+            {self.get_vrt("VRTHFfold111_sds")}
+            {self.get_vrt("VRTHFfold121_x_tref")}
+            {self.get_vrt("VRTHFfold12")}
+            {self.get_vrt("VRTHFfold121")}
+            {self.get_vrt("VRTHFfold121_x_rref")}
+            {self.get_vrt("VRTHFfold121_x")}
+            {self.get_vrt("VRTHFfold121_y_rref")}
+            {self.get_vrt("VRTHFfold121_y")}
+            {self.get_vrt("VRTHFfold121_z_rref")}
+            {self.get_vrt("VRTHFfold121_z")}
+            {self.get_vrt("VRTHFfold121_sds")}
+            {self.get_vrt("VRTHFfold131_x_tref")}
+            {self.get_vrt("VRTHFfold13")}
+            {self.get_vrt("VRTHFfold131")}
+            {self.get_vrt("VRTHFfold131_x_rref")}
+            {self.get_vrt("VRTHFfold131_x")}
+            {self.get_vrt("VRTHFfold131_y_rref")}
+            {self.get_vrt("VRTHFfold131_y")}
+            {self.get_vrt("VRTHFfold131_z_rref")}
+            {self.get_vrt("VRTHFfold131_z")}
+            {self.get_vrt("VRTHFfold131_sds")}
+            {self.get_vrt("VRTHFfold141_x_tref")}
+            {self.get_vrt("VRTHFfold14")}
+            {self.get_vrt("VRTHFfold141")}
+            {self.get_vrt("VRTHFfold141_x_rref")}
+            {self.get_vrt("VRTHFfold141_x")}
+            {self.get_vrt("VRTHFfold141_y_rref")}
+            {self.get_vrt("VRTHFfold141_y")}
+            {self.get_vrt("VRTHFfold141_z_rref")}
+            {self.get_vrt("VRTHFfold141_z")}
+            {self.get_vrt("VRTHFfold141_sds")}
+            {self.get_vrt("VRTHFfold151_x_tref")}
+            {self.get_vrt("VRTHFfold15")}
+            {self.get_vrt("VRTHFfold151")}
+            {self.get_vrt("VRTHFfold151_x_rref")}
+            {self.get_vrt("VRTHFfold151_x")}
+            {self.get_vrt("VRTHFfold151_y_rref")}
+            {self.get_vrt("VRTHFfold151_y")}
+            {self.get_vrt("VRTHFfold151_z_rref")}
+            {self.get_vrt("VRTHFfold151_z")}
+            {self.get_vrt("VRTHFfold151_sds")}
+            virtual_coordinates_stop  
+            connect_virtual JUMPHFfold1_z_tref VRTglobal VRTHFfold1_z_tref
+            connect_virtual JUMPHFfold VRTHFfold1_z_tref VRTHFfold
+            connect_virtual JUMPHFfold1 VRTHFfold VRTHFfold1
+            connect_virtual JUMPHFfold1_z_rref VRTHFfold1 VRTHFfold1_z_rref
+            connect_virtual JUMPHFfold1_z VRTHFfold1_z_rref VRTHFfold1_z
+            connect_virtual JUMPHFfold111_x_tref VRTHFfold1_z VRTHFfold111_x_tref
+            connect_virtual JUMPHFfold11 VRTHFfold111_x_tref VRTHFfold11
+            connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
+            connect_virtual JUMPHFfold111_x_rref VRTHFfold111 VRTHFfold111_x_rref
+            connect_virtual JUMPHFfold111_x VRTHFfold111_x_rref VRTHFfold111_x
+            connect_virtual JUMPHFfold111_y_rref VRTHFfold111_x VRTHFfold111_y_rref
+            connect_virtual JUMPHFfold111_y VRTHFfold111_y_rref VRTHFfold111_y
+            connect_virtual JUMPHFfold111_z_rref VRTHFfold111_y VRTHFfold111_z_rref
+            connect_virtual JUMPHFfold111_z VRTHFfold111_z_rref VRTHFfold111_z
+            connect_virtual JUMPHFfold111_sds VRTHFfold111_z VRTHFfold111_sds
+            connect_virtual JUMPHFfold111_subunit VRTHFfold111_sds SUBUNIT
+            connect_virtual JUMPHFfold121_x_tref VRTHFfold1_z VRTHFfold121_x_tref
+            connect_virtual JUMPHFfold12 VRTHFfold121_x_tref VRTHFfold12
+            connect_virtual JUMPHFfold121 VRTHFfold12 VRTHFfold121
+            connect_virtual JUMPHFfold121_x_rref VRTHFfold121 VRTHFfold121_x_rref
+            connect_virtual JUMPHFfold121_x VRTHFfold121_x_rref VRTHFfold121_x
+            connect_virtual JUMPHFfold121_y_rref VRTHFfold121_x VRTHFfold121_y_rref
+            connect_virtual JUMPHFfold121_y VRTHFfold121_y_rref VRTHFfold121_y
+            connect_virtual JUMPHFfold121_z_rref VRTHFfold121_y VRTHFfold121_z_rref
+            connect_virtual JUMPHFfold121_z VRTHFfold121_z_rref VRTHFfold121_z
+            connect_virtual JUMPHFfold121_sds VRTHFfold121_z VRTHFfold121_sds
+            connect_virtual JUMPHFfold121_subunit VRTHFfold121_sds SUBUNIT
+            connect_virtual JUMPHFfold131_x_tref VRTHFfold1_z VRTHFfold131_x_tref
+            connect_virtual JUMPHFfold13 VRTHFfold131_x_tref VRTHFfold13
+            connect_virtual JUMPHFfold131 VRTHFfold13 VRTHFfold131
+            connect_virtual JUMPHFfold131_x_rref VRTHFfold131 VRTHFfold131_x_rref
+            connect_virtual JUMPHFfold131_x VRTHFfold131_x_rref VRTHFfold131_x
+            connect_virtual JUMPHFfold131_y_rref VRTHFfold131_x VRTHFfold131_y_rref
+            connect_virtual JUMPHFfold131_y VRTHFfold131_y_rref VRTHFfold131_y
+            connect_virtual JUMPHFfold131_z_rref VRTHFfold131_y VRTHFfold131_z_rref
+            connect_virtual JUMPHFfold131_z VRTHFfold131_z_rref VRTHFfold131_z
+            connect_virtual JUMPHFfold131_sds VRTHFfold131_z VRTHFfold131_sds
+            connect_virtual JUMPHFfold131_subunit VRTHFfold131_sds SUBUNIT
+            connect_virtual JUMPHFfold141_x_tref VRTHFfold1_z VRTHFfold141_x_tref
+            connect_virtual JUMPHFfold14 VRTHFfold141_x_tref VRTHFfold14
+            connect_virtual JUMPHFfold141 VRTHFfold14 VRTHFfold141
+            connect_virtual JUMPHFfold141_x_rref VRTHFfold141 VRTHFfold141_x_rref
+            connect_virtual JUMPHFfold141_x VRTHFfold141_x_rref VRTHFfold141_x
+            connect_virtual JUMPHFfold141_y_rref VRTHFfold141_x VRTHFfold141_y_rref
+            connect_virtual JUMPHFfold141_y VRTHFfold141_y_rref VRTHFfold141_y
+            connect_virtual JUMPHFfold141_z_rref VRTHFfold141_y VRTHFfold141_z_rref
+            connect_virtual JUMPHFfold141_z VRTHFfold141_z_rref VRTHFfold141_z
+            connect_virtual JUMPHFfold141_sds VRTHFfold141_z VRTHFfold141_sds
+            connect_virtual JUMPHFfold141_subunit VRTHFfold141_sds SUBUNIT
+            connect_virtual JUMPHFfold151_x_tref VRTHFfold1_z VRTHFfold151_x_tref
+            connect_virtual JUMPHFfold15 VRTHFfold151_x_tref VRTHFfold15
+            connect_virtual JUMPHFfold151 VRTHFfold15 VRTHFfold151
+            connect_virtual JUMPHFfold151_x_rref VRTHFfold151 VRTHFfold151_x_rref
+            connect_virtual JUMPHFfold151_x VRTHFfold151_x_rref VRTHFfold151_x
+            connect_virtual JUMPHFfold151_y_rref VRTHFfold151_x VRTHFfold151_y_rref
+            connect_virtual JUMPHFfold151_y VRTHFfold151_y_rref VRTHFfold151_y
+            connect_virtual JUMPHFfold151_z_rref VRTHFfold151_y VRTHFfold151_z_rref
+            connect_virtual JUMPHFfold151_z VRTHFfold151_z_rref VRTHFfold151_z
+            connect_virtual JUMPHFfold151_sds VRTHFfold151_z VRTHFfold151_sds
+            connect_virtual JUMPHFfold151_subunit VRTHFfold151_sds SUBUNIT 
+            set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) 
+            set_dof JUMPHFfold1_z angle_z({symmetry_setup._dofs['JUMPHFfold1_z'][0][2]})
+            set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
+            set_dof JUMPHFfold111_x angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]})
+            set_dof JUMPHFfold111_y angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
+            set_dof JUMPHFfold111_z angle_z({symmetry_setup._dofs['JUMPHFfold111_z'][0][2]})
+            set_jump_group JUMPGROUP1 JUMPHFfold111 JUMPHFfold121 JUMPHFfold131 JUMPHFfold141 JUMPHFfold151 
+            set_jump_group JUMPGROUP2 JUMPHFfold111_x JUMPHFfold121_x JUMPHFfold131_x JUMPHFfold141_x JUMPHFfold151_x 
+            set_jump_group JUMPGROUP3 JUMPHFfold111_y JUMPHFfold121_y JUMPHFfold131_y JUMPHFfold141_y JUMPHFfold151_y 
+            set_jump_group JUMPGROUP4 JUMPHFfold111_z JUMPHFfold121_z JUMPHFfold131_z JUMPHFfold141_z JUMPHFfold151_z 
+            set_jump_group JUMPGROUP5 JUMPHFfold111_sds JUMPHFfold121_sds JUMPHFfold131_sds JUMPHFfold141_sds JUMPHFfold151_sds 
+            set_jump_group JUMPGROUP6 JUMPHFfold111_subunit JUMPHFfold121_subunit JUMPHFfold131_subunit JUMPHFfold141_subunit JUMPHFfold151_subunit 
           """)))
 
         # TODO: change the symmetry so that depending on if it is 4v4m or 1stm different symmetries have to be used
@@ -716,145 +820,305 @@ class CubicSetup(SymmetrySetup):
         fold3 = CubicSetup()
         fold3.read_from_file(
             StringIO(textwrap.dedent(f"""symmetry_name 3fold
-          E = 60*VRTHFfold111_sds + 60*(VRTHFfold111_sds:VRT3fold111_sds)
-          anchor_residue COM
-          virtual_coordinates_start
-          {self.get_vrt("VRTglobal")}
-          {self.get_vrt("VRTHFfold")}
-          {self.get_vrt("VRTHFfold1")}
-          {self.get_vrt("VRTHFfold11")}
-          {self.get_vrt("VRTHFfold111")}
-          {self.get_vrt("VRTHFfold111_sds")}
-          {self.get_vrt("VRT3fold")}
-          {self.get_vrt("VRT3fold1")}
-          {self.get_vrt("VRT3fold11")}
-          {self.get_vrt("VRT3fold111")}
-          {self.get_vrt("VRT3fold111_sds")}
-          {self.get_vrt("VRT2fold")}
-          {self.get_vrt("VRT2fold1")}
-          {self.get_vrt("VRT2fold12")}
-          {self.get_vrt("VRT2fold121")}
-          {self.get_vrt("VRT2fold121_sds")}
-          virtual_coordinates_stop
-          connect_virtual JUMPHFfold VRTglobal VRTHFfold
-          connect_virtual JUMPHFfold1 VRTHFfold VRTHFfold1
-          connect_virtual JUMPHFfold11 VRTHFfold1 VRTHFfold11
-          connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
-          connect_virtual JUMPHFfold1111 VRTHFfold111 VRTHFfold111_sds
-          connect_virtual JUMPHFfold1111_subunit VRTHFfold111_sds SUBUNIT
-          connect_virtual JUMP3fold VRTglobal VRT3fold
-          connect_virtual JUMP3fold1 VRT3fold VRT3fold1
-          connect_virtual JUMP3fold11 VRT3fold1 VRT3fold11
-          connect_virtual JUMP3fold111 VRT3fold11 VRT3fold111
-          connect_virtual JUMP3fold1111 VRT3fold111 VRT3fold111_sds
-          connect_virtual JUMP3fold1111_subunit VRT3fold111_sds SUBUNIT
-          connect_virtual JUMP2fold VRTglobal VRT2fold
-          connect_virtual JUMP2fold1 VRT2fold VRT2fold1
-          connect_virtual JUMP2fold12 VRT2fold1 VRT2fold12
-          connect_virtual JUMP2fold121 VRT2fold12 VRT2fold121
-          connect_virtual JUMP2fold1211 VRT2fold121 VRT2fold121_sds
-          connect_virtual JUMP2fold1211_subunit VRT2fold121_sds SUBUNIT
-          set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMPHFfold1'][0][2]})
-          set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
-          set_dof JUMPHFfold1111 angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]}) angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
-          set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP3fold1 JUMP2fold1
-          set_jump_group JUMPGROUP2 JUMPHFfold111 JUMP3fold111  JUMP2fold121
-          set_jump_group JUMPGROUP3 JUMPHFfold1111 JUMP3fold1111  JUMP2fold1211
-          set_jump_group JUMPGROUP4 JUMPHFfold1111_subunit JUMP3fold1111_subunit JUMP2fold1211_subunit
-          """)))
+            E = 3*VRTHFfold111_sds + 3*(VRTHFfold111_sds:VRT3fold111_sds)
+            anchor_residue COM
+            virtual_coordinates_start
+            {self.get_vrt("VRTglobal")}
+            {self.get_vrt("VRTHFfold1_z_tref")}
+            {self.get_vrt("VRTHFfold")}
+            {self.get_vrt("VRTHFfold1")}
+            {self.get_vrt("VRTHFfold1_z_rref")}
+            {self.get_vrt("VRTHFfold1_z")}
+            {self.get_vrt("VRTHFfold111_x_tref")}
+            {self.get_vrt("VRTHFfold11")}
+            {self.get_vrt("VRTHFfold111")}
+            {self.get_vrt("VRTHFfold111_x_rref")}
+            {self.get_vrt("VRTHFfold111_x")}
+            {self.get_vrt("VRTHFfold111_y_rref")}
+            {self.get_vrt("VRTHFfold111_y")}
+            {self.get_vrt("VRTHFfold111_z_rref")}
+            {self.get_vrt("VRTHFfold111_z")}
+            {self.get_vrt("VRTHFfold111_sds")}
+            {self.get_vrt("VRT3fold1_z_tref")}
+            {self.get_vrt("VRT3fold")}
+            {self.get_vrt("VRT3fold1")} 
+            {self.get_vrt("VRT3fold1_z_rref")} 
+            {self.get_vrt("VRT3fold1_z")} 
+            {self.get_vrt("VRT3fold111_x_tref")} 
+            {self.get_vrt("VRT3fold11")} 
+            {self.get_vrt("VRT3fold111")} 
+            {self.get_vrt("VRT3fold111_x_rref")} 
+            {self.get_vrt("VRT3fold111_x")} 
+            {self.get_vrt("VRT3fold111_y_rref")} 
+            {self.get_vrt("VRT3fold111_y")} 
+            {self.get_vrt("VRT3fold111_z_rref")}
+            {self.get_vrt("VRT3fold111_z")} 
+            {self.get_vrt("VRT3fold111_sds")} 
+            {self.get_vrt("VRT2fold1_z_tref")} 
+            {self.get_vrt("VRT2fold")} 
+            {self.get_vrt("VRT2fold1")} 
+            {self.get_vrt("VRT2fold121_x_tref")} 
+            {self.get_vrt("VRT2fold1_z_rref")} 
+            {self.get_vrt("VRT2fold1_z")} 
+            {self.get_vrt("VRT2fold12")} 
+            {self.get_vrt("VRT2fold121")} 
+            {self.get_vrt("VRT2fold121_x_rref")} 
+            {self.get_vrt("VRT2fold121_x")} 
+            {self.get_vrt("VRT2fold121_y_rref")} 
+            {self.get_vrt("VRT2fold121_y")} 
+            {self.get_vrt("VRT2fold121_z_rref")} 
+            {self.get_vrt("VRT2fold121_z")} 
+            {self.get_vrt("VRT2fold121_sds")} 
+            virtual_coordinates_stop  
+            connect_virtual JUMPHFfold1_z_tref VRTglobal VRTHFfold1_z_tref
+            connect_virtual JUMPHFfold VRTHFfold1_z_tref VRTHFfold
+            connect_virtual JUMPHFfold1 VRTHFfold VRTHFfold1
+            connect_virtual JUMPHFfold1_z_rref VRTHFfold1 VRTHFfold1_z_rref
+            connect_virtual JUMPHFfold1_z VRTHFfold1_z_rref VRTHFfold1_z
+            connect_virtual JUMPHFfold111_x_tref VRTHFfold1_z VRTHFfold111_x_tref
+            connect_virtual JUMPHFfold11 VRTHFfold111_x_tref VRTHFfold11
+            connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
+            connect_virtual JUMPHFfold111_x_rref VRTHFfold111 VRTHFfold111_x_rref
+            connect_virtual JUMPHFfold111_x VRTHFfold111_x_rref VRTHFfold111_x
+            connect_virtual JUMPHFfold111_y_rref VRTHFfold111_x VRTHFfold111_y_rref
+            connect_virtual JUMPHFfold111_y VRTHFfold111_y_rref VRTHFfold111_y
+            connect_virtual JUMPHFfold111_z_rref VRTHFfold111_y VRTHFfold111_z_rref
+            connect_virtual JUMPHFfold111_z VRTHFfold111_z_rref VRTHFfold111_z
+            connect_virtual JUMPHFfold111_sds VRTHFfold111_z VRTHFfold111_sds
+            connect_virtual JUMPHFfold111_subunit VRTHFfold111_sds SUBUNIT
+            connect_virtual JUMP3fold1_z_tref VRTglobal VRT3fold1_z_tref
+            connect_virtual JUMP3fold VRT3fold1_z_tref VRT3fold
+            connect_virtual JUMP3fold1 VRT3fold VRT3fold1
+            connect_virtual JUMP3fold1_z_rref VRT3fold1 VRT3fold1_z_rref
+            connect_virtual JUMP3fold1_z VRT3fold1_z_rref VRT3fold1_z
+            connect_virtual JUMP3fold111_x_tref VRT3fold1_z VRT3fold111_x_tref
+            connect_virtual JUMP3fold11 VRT3fold111_x_tref VRT3fold11
+            connect_virtual JUMP3fold111 VRT3fold11 VRT3fold111
+            connect_virtual JUMP3fold111_x_rref VRT3fold111 VRT3fold111_x_rref
+            connect_virtual JUMP3fold111_x VRT3fold111_x_rref VRT3fold111_x
+            connect_virtual JUMP3fold111_y_rref VRT3fold111_x VRT3fold111_y_rref
+            connect_virtual JUMP3fold111_y VRT3fold111_y_rref VRT3fold111_y
+            connect_virtual JUMP3fold111_z_rref VRT3fold111_y VRT3fold111_z_rref
+            connect_virtual JUMP3fold111_z VRT3fold111_z_rref VRT3fold111_z
+            connect_virtual JUMP3fold111_sds VRT3fold111_z VRT3fold111_sds
+            connect_virtual JUMP3fold111_subunit VRT3fold111_sds SUBUNIT
+            connect_virtual JUMP2fold1_z_tref VRTglobal VRT2fold1_z_tref
+            connect_virtual JUMP2fold VRT2fold1_z_tref VRT2fold
+            connect_virtual JUMP2fold1 VRT2fold VRT2fold1
+            connect_virtual JUMP2fold1_z_rref VRT2fold1 VRT2fold1_z_rref
+            connect_virtual JUMP2fold1_z VRT2fold1_z_rref VRT2fold1_z
+            connect_virtual JUMP2fold121_x_tref VRT2fold1_z VRT2fold121_x_tref
+            connect_virtual JUMP2fold12 VRT2fold121_x_tref VRT2fold12
+            connect_virtual JUMP2fold121 VRT2fold12 VRT2fold121
+            connect_virtual JUMP2fold121_x_rref VRT2fold121 VRT2fold121_x_rref
+            connect_virtual JUMP2fold121_x VRT2fold121_x_rref VRT2fold121_x
+            connect_virtual JUMP2fold121_y_rref VRT2fold121_x VRT2fold121_y_rref
+            connect_virtual JUMP2fold121_y VRT2fold121_y_rref VRT2fold121_y
+            connect_virtual JUMP2fold121_z_rref VRT2fold121_y VRT2fold121_z_rref
+            connect_virtual JUMP2fold121_z VRT2fold121_z_rref VRT2fold121_z
+            connect_virtual JUMP2fold121_sds VRT2fold121_z VRT2fold121_sds
+            connect_virtual JUMP2fold121_subunit VRT2fold121_sds SUBUNIT
+            set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) 
+            set_dof JUMPHFfold1_z angle_z({symmetry_setup._dofs['JUMPHFfold1_z'][0][2]})
+            set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
+            set_dof JUMPHFfold111_x angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]})
+            set_dof JUMPHFfold111_y angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
+            set_dof JUMPHFfold111_z angle_z({symmetry_setup._dofs['JUMPHFfold111_z'][0][2]})
+            set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP3fold1 JUMP2fold1
+            set_jump_group JUMPGROUP2 JUMPHFfold1_z JUMP3fold1_z JUMP2fold1_z
+            set_jump_group JUMPGROUP3 JUMPHFfold111 JUMP3fold111 JUMP2fold121
+            set_jump_group JUMPGROUP4 JUMPHFfold111_x JUMP3fold111_x JUMP2fold121_x
+            set_jump_group JUMPGROUP5 JUMPHFfold111_y JUMP3fold111_y JUMP2fold121_y
+            set_jump_group JUMPGROUP6 JUMPHFfold111_z JUMP3fold111_z JUMP2fold121_z
+            set_jump_group JUMPGROUP7 JUMPHFfold111_sds JUMP3fold111_sds JUMP2fold121_sds
+            set_jump_group JUMPGROUP8 JUMPHFfold111_subunit JUMP3fold111_subunit JUMP2fold121_subunit
+            """)))
 
         fold2_1 = CubicSetup()
         fold2_1.read_from_file(
             StringIO(textwrap.dedent(f"""symmetry_name 2fold_1
-          E = 60*VRTHFfold111_sds + 30*(VRTHFfold111_sds:VRT2fold111_sds)
+          E = 2*VRTHFfold111_sds + 1*(VRTHFfold111_sds:VRT2fold111_sds)
           anchor_residue COM
           virtual_coordinates_start
           {self.get_vrt("VRTglobal")}
+          {self.get_vrt("VRTHFfold1_z_tref")}
           {self.get_vrt("VRTHFfold")}
           {self.get_vrt("VRTHFfold1")}
+          {self.get_vrt("VRTHFfold1_z_rref")}
+          {self.get_vrt("VRTHFfold1_z")}
+          {self.get_vrt("VRTHFfold111_x_tref")}
           {self.get_vrt("VRTHFfold11")}
           {self.get_vrt("VRTHFfold111")}
+          {self.get_vrt("VRTHFfold111_x_rref")}
+          {self.get_vrt("VRTHFfold111_x")}
+          {self.get_vrt("VRTHFfold111_y_rref")}
+          {self.get_vrt("VRTHFfold111_y")}
+          {self.get_vrt("VRTHFfold111_z_rref")}
+          {self.get_vrt("VRTHFfold111_z")}
           {self.get_vrt("VRTHFfold111_sds")}
+          {self.get_vrt("VRT2fold1_z_tref")}
           {self.get_vrt("VRT2fold")}
           {self.get_vrt("VRT2fold1")}
+          {self.get_vrt("VRT2fold1_z_rref")}
+          {self.get_vrt("VRT2fold1_z")}
+          {self.get_vrt("VRT2fold111_x_tref")}
           {self.get_vrt("VRT2fold11")}
           {self.get_vrt("VRT2fold111")}
+          {self.get_vrt("VRT2fold111_x_rref")}
+          {self.get_vrt("VRT2fold111_x")}
+          {self.get_vrt("VRT2fold111_y_rref")}
+          {self.get_vrt("VRT2fold111_y")}
+          {self.get_vrt("VRT2fold111_z_rref")}
+          {self.get_vrt("VRT2fold111_z")}
           {self.get_vrt("VRT2fold111_sds")}
-          virtual_coordinates_stop
-          connect_virtual JUMPHFfold VRTglobal VRTHFfold
+          connect_virtual JUMPHFfold1_z_tref VRTglobal VRTHFfold1_z_tref
+          connect_virtual JUMPHFfold VRTHFfold1_z_tref VRTHFfold
           connect_virtual JUMPHFfold1 VRTHFfold VRTHFfold1
-          connect_virtual JUMPHFfold11 VRTHFfold1 VRTHFfold11
-          connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
-          connect_virtual JUMPHFfold1111 VRTHFfold111 VRTHFfold111_sds
-          connect_virtual JUMPHFfold1111_subunit VRTHFfold111_sds SUBUNIT
-          connect_virtual JUMP2fold VRTglobal VRT2fold
-          connect_virtual JUMP2fold1 VRT2fold VRT2fold1
-          connect_virtual JUMP2fold11 VRT2fold1 VRT2fold11
-          connect_virtual JUMP2fold111 VRT2fold11 VRT2fold111
-          connect_virtual JUMP2fold1111 VRT2fold111 VRT2fold111_sds
-          connect_virtual JUMP2fold1111_subunit VRT2fold111_sds SUBUNIT
-          set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMPHFfold1'][0][2]})
-          set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
-          set_dof JUMPHFfold1111 angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]}) angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
-          set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP2fold1
-          set_jump_group JUMPGROUP2 JUMPHFfold111 JUMP2fold111 
-          set_jump_group JUMPGROUP3 JUMPHFfold1111 JUMP2fold1111 
-          set_jump_group JUMPGROUP4 JUMPHFfold1111_subunit JUMP2fold1111_subunit 
-          """)))
+        connect_virtual JUMPHFfold1_z_rref VRTHFfold1 VRTHFfold1_z_rref
+        connect_virtual JUMPHFfold1_z VRTHFfold1_z_rref VRTHFfold1_z
+        connect_virtual JUMPHFfold111_x_tref VRTHFfold1_z VRTHFfold111_x_tref
+        connect_virtual JUMPHFfold11 VRTHFfold111_x_tref VRTHFfold11
+        connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
+        connect_virtual JUMPHFfold111_x_rref VRTHFfold111 VRTHFfold111_x_rref
+        connect_virtual JUMPHFfold111_x VRTHFfold111_x_rref VRTHFfold111_x
+        connect_virtual JUMPHFfold111_y_rref VRTHFfold111_x VRTHFfold111_y_rref
+        connect_virtual JUMPHFfold111_y VRTHFfold111_y_rref VRTHFfold111_y
+        connect_virtual JUMPHFfold111_z_rref VRTHFfold111_y VRTHFfold111_z_rref
+        connect_virtual JUMPHFfold111_z VRTHFfold111_z_rref VRTHFfold111_z
+        connect_virtual JUMPHFfold111_sds VRTHFfold111_z VRTHFfold111_sds
+        connect_virtual JUMPHFfold111_subunit VRTHFfold111_sds SUBUNIT
+        connect_virtual JUMP2fold1_z_tref VRTglobal VRT2fold1_z_tref
+        connect_virtual JUMP2fold VRT2fold1_z_tref VRT2fold
+        connect_virtual JUMP2fold1 VRT2fold VRT2fold1
+        connect_virtual JUMP2fold1_z_rref VRT2fold1 VRT2fold1_z_rref
+        connect_virtual JUMP2fold1_z VRT2fold1_z_rref VRT2fold1_z
+        connect_virtual JUMP2fold111_x_tref VRT2fold1_z VRT2fold111_x_tref
+        connect_virtual JUMP2fold11 VRT2fold111_x_tref VRT2fold11
+        connect_virtual JUMP2fold111 VRT2fold11 VRT2fold111
+        connect_virtual JUMP2fold111_x_rref VRT2fold111 VRT2fold111_x_rref
+        connect_virtual JUMP2fold111_x VRT2fold111_x_rref VRT2fold111_x
+        connect_virtual JUMP2fold111_y_rref VRT2fold111_x VRT2fold111_y_rref
+        connect_virtual JUMP2fold111_y VRT2fold111_y_rref VRT2fold111_y
+        connect_virtual JUMP2fold111_z_rref VRT2fold111_y VRT2fold111_z_rref
+        connect_virtual JUMP2fold111_z VRT2fold111_z_rref VRT2fold111_z
+        connect_virtual JUMP2fold111_sds VRT2fold111_z VRT2fold111_sds
+        connect_virtual JUMP2fold111_subunit VRT2fold111_sds SUBUNIT
+        set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) 
+        set_dof JUMPHFfold1_z angle_z({symmetry_setup._dofs['JUMPHFfold1_z'][0][2]})
+        set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
+        set_dof JUMPHFfold111_x angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]})
+        set_dof JUMPHFfold111_y angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
+        set_dof JUMPHFfold111_z angle_z({symmetry_setup._dofs['JUMPHFfold111_z'][0][2]})
+        set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP2fold1
+        set_jump_group JUMPGROUP2 JUMPHFfold1_z JUMP2fold1_z
+        set_jump_group JUMPGROUP3 JUMPHFfold111 JUMP2fold111
+        set_jump_group JUMPGROUP4 JUMPHFfold111_x JUMP2fold111_x
+        set_jump_group JUMPGROUP5 JUMPHFfold111_y JUMP2fold111_y
+        set_jump_group JUMPGROUP6 JUMPHFfold111_z JUMP2fold111_z
+        set_jump_group JUMPGROUP7 JUMPHFfold111_sds JUMP2fold111_sds
+        set_jump_group JUMPGROUP8 JUMPHFfold111_subunit JUMP2fold111_subunit""")))
 
         fold2_2 = CubicSetup()
         fold2_2.read_from_file(
             StringIO(textwrap.dedent(f"""symmetry_name fold2_2 
-          E = 60*VRTHFfold111_sds + 30*(VRTHFfold111_sds:VRT3fold121_sds)
+          E = 2*VRTHFfold111_sds + 1*(VRTHFfold111_sds:VRT3fold121_sds)
           anchor_residue COM
           virtual_coordinates_start
-          {self.get_vrt("VRTglobal")}
+            {self.get_vrt("VRTglobal")}
+          {self.get_vrt("VRTHFfold1_z_tref")}
           {self.get_vrt("VRTHFfold")}
           {self.get_vrt("VRTHFfold1")}
+          {self.get_vrt("VRTHFfold1_z_rref")}
+          {self.get_vrt("VRTHFfold1_z")}
+          {self.get_vrt("VRTHFfold111_x_tref")}
           {self.get_vrt("VRTHFfold11")}
           {self.get_vrt("VRTHFfold111")}
+          {self.get_vrt("VRTHFfold111_x_rref")}
+          {self.get_vrt("VRTHFfold111_x")}
+          {self.get_vrt("VRTHFfold111_y_rref")}
+          {self.get_vrt("VRTHFfold111_y")}
+          {self.get_vrt("VRTHFfold111_z_rref")}
+          {self.get_vrt("VRTHFfold111_z")}
           {self.get_vrt("VRTHFfold111_sds")}
+          {self.get_vrt("VRT3fold1_z_tref")}
           {self.get_vrt("VRT3fold")}
           {self.get_vrt("VRT3fold1")}
+          {self.get_vrt("VRT3fold1_z_rref")}
+          {self.get_vrt("VRT3fold1_z")}
+          {self.get_vrt("VRT3fold121_x_tref")}
           {self.get_vrt("VRT3fold12")}
           {self.get_vrt("VRT3fold121")}
+          {self.get_vrt("VRT3fold121_x_rref")}
+          {self.get_vrt("VRT3fold121_x")}
+          {self.get_vrt("VRT3fold121_y_rref")}
+          {self.get_vrt("VRT3fold121_y")}
+          {self.get_vrt("VRT3fold121_z_rref")}
+          {self.get_vrt("VRT3fold121_z")}
           {self.get_vrt("VRT3fold121_sds")}
-          virtual_coordinates_stop
-          connect_virtual JUMPHFfold VRTglobal VRTHFfold
+          connect_virtual JUMPHFfold1_z_tref VRTglobal VRTHFfold1_z_tref
+          connect_virtual JUMPHFfold VRTHFfold1_z_tref VRTHFfold
           connect_virtual JUMPHFfold1 VRTHFfold VRTHFfold1
-          connect_virtual JUMPHFfold11 VRTHFfold1 VRTHFfold11
-          connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
-          connect_virtual JUMPHFfold1111 VRTHFfold111 VRTHFfold111_sds
-          connect_virtual JUMPHFfold1111_subunit VRTHFfold111_sds SUBUNIT
-          connect_virtual JUMP3fold VRTglobal VRT3fold
-          connect_virtual JUMP3fold1 VRT3fold VRT3fold1
-          connect_virtual JUMP3fold12 VRT3fold1 VRT3fold12
-          connect_virtual JUMP3fold121 VRT3fold12 VRT3fold121
-          connect_virtual JUMP3fold1211 VRT3fold121 VRT3fold121_sds
-          connect_virtual JUMP3fold1211_subunit VRT3fold121_sds SUBUNIT
-          set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) angle_z({symmetry_setup._dofs['JUMPHFfold1'][0][2]})
-          set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
-          set_dof JUMPHFfold1111 angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]}) angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
-          set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP3fold1
-          set_jump_group JUMPGROUP2 JUMPHFfold111 JUMP3fold121
-          set_jump_group JUMPGROUP3 JUMPHFfold1111 JUMP3fold1211
-          set_jump_group JUMPGROUP4 JUMPHFfold1111_subunit JUMP3fold1211_subunit
-          """)))
-
-        # setup_3fold = SymmetrySetup("3fold")
-        # vrtglobal = symmetry_setup.get_vrt_name("VRTglobal")
-        # center_of_3fold = np.array([symmetry_setup.get_vrt_name(vrt).vrt_orig for vrt in ("VRTHFfold1111", "VRT3fold1111", "VRT2fold1111")]).sum(axis=1) / 3
-        # rotation_to_3fold = rotation_matrix_from_vector_to_vector(vrtglobal.vrt_orig, center_of_3fold)
-        # vrt3fold = copy.deepcopy(vrtglobal).rotate(rotation_to_3fold)
+        connect_virtual JUMPHFfold1_z_rref VRTHFfold1 VRTHFfold1_z_rref
+        connect_virtual JUMPHFfold1_z VRTHFfold1_z_rref VRTHFfold1_z
+        connect_virtual JUMPHFfold111_x_tref VRTHFfold1_z VRTHFfold111_x_tref
+        connect_virtual JUMPHFfold11 VRTHFfold111_x_tref VRTHFfold11
+        connect_virtual JUMPHFfold111 VRTHFfold11 VRTHFfold111
+        connect_virtual JUMPHFfold111_x_rref VRTHFfold111 VRTHFfold111_x_rref
+        connect_virtual JUMPHFfold111_x VRTHFfold111_x_rref VRTHFfold111_x
+        connect_virtual JUMPHFfold111_y_rref VRTHFfold111_x VRTHFfold111_y_rref
+        connect_virtual JUMPHFfold111_y VRTHFfold111_y_rref VRTHFfold111_y
+        connect_virtual JUMPHFfold111_z_rref VRTHFfold111_y VRTHFfold111_z_rref
+        connect_virtual JUMPHFfold111_z VRTHFfold111_z_rref VRTHFfold111_z
+        connect_virtual JUMPHFfold111_sds VRTHFfold111_z VRTHFfold111_sds
+        connect_virtual JUMPHFfold111_subunit VRTHFfold111_sds SUBUNIT
+        connect_virtual JUMP3fold1_z_tref VRTglobal VRT3fold1_z_tref
+        connect_virtual JUMP3fold VRT3fold1_z_tref VRT3fold
+        connect_virtual JUMP3fold1 VRT3fold VRT3fold1
+        connect_virtual JUMP3fold1_z_rref VRT3fold1 VRT3fold1_z_rref
+        connect_virtual JUMP3fold1_z VRT3fold1_z_rref VRT3fold1_z
+        connect_virtual JUMP3fold111_x_tref VRT3fold1_z VRT3fold121_x_tref
+        connect_virtual JUMP3fold12 VRT3fold121_x_tref VRT3fold12
+        connect_virtual JUMP3fold121 VRT3fold12 VRT3fold121
+        connect_virtual JUMP3fold121_x_rref VRT3fold121 VRT3fold121_x_rref
+        connect_virtual JUMP3fold121_x VRT3fold121_x_rref VRT3fold121_x
+        connect_virtual JUMP3fold121_y_rref VRT3fold121_x VRT3fold121_y_rref
+        connect_virtual JUMP3fold121_y VRT3fold121_y_rref VRT3fold121_y
+        connect_virtual JUMP3fold121_z_rref VRT3fold121_y VRT3fold121_z_rref
+        connect_virtual JUMP3fold121_z VRT3fold121_z_rref VRT3fold121_z
+        connect_virtual JUMP3fold121_sds VRT3fold121_z VRT3fold121_sds
+        connect_virtual JUMP3fold121_subunit VRT3fold121_sds SUBUNIT
+        set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) 
+        set_dof JUMPHFfold1_z angle_z({symmetry_setup._dofs['JUMPHFfold1_z'][0][2]})
+        set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
+        set_dof JUMPHFfold111_x angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]})
+        set_dof JUMPHFfold111_y angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
+        set_dof JUMPHFfold111_z angle_z({symmetry_setup._dofs['JUMPHFfold111_z'][0][2]})
+        set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP3fold1
+        set_jump_group JUMPGROUP2 JUMPHFfold1_z JUMP3fold1_z
+        set_jump_group JUMPGROUP3 JUMPHFfold111 JUMP3fold121
+        set_jump_group JUMPGROUP4 JUMPHFfold111_x JUMP3fold121_x
+        set_jump_group JUMPGROUP5 JUMPHFfold111_y JUMP3fold121_y
+        set_jump_group JUMPGROUP6 JUMPHFfold111_z JUMP3fold121_z
+        set_jump_group JUMPGROUP7 JUMPHFfold111_sds JUMP3fold121_sds
+        set_jump_group JUMPGROUP8 JUMPHFfold111_subunit JUMP3fold121_subunit
+        """)))
 
         return fold5, fold3, fold2_1, fold2_2
+
+    def get_5fold_center_(self):
+        raise ValueError
+        return self.get_vrt("VRTHFfold111").vrt_orig
+
+    def get_3fold_plane_from_HFfold(self):
+        a = self.get_vrt("VRTHFfold111_z").vrt_orig
+        b = self.get_vrt("VRT2fold121_z").vrt_orig
+        c = self.get_vrt("VRT3fold111_z").vrt_orig
+        return a, b, c
 
     def get_3fold_center_from_HFfold(self):
         """Returns the center of the 3-fold"""
         try: # for icosahedral symmetry
-            a = self.get_vrt("VRTHFfold111_z").vrt_orig
-            b = self.get_vrt("VRT2fold121_z").vrt_orig
-            c = self.get_vrt("VRT3fold111_z").vrt_orig
+            a, b, c = self.get_3fold_plane_from_HFfold()
             return (a + b + c) / 3
         except ValueError:
             raise NotImplementedError("Only works for icosahedral symmetry")
@@ -2684,3 +2948,502 @@ class CubicSetup(SymmetrySetup):
         if straighten_COM:
             self.straightinator(ss2)
         return ss2
+
+
+    def add_full_chains(self):
+        ss = copy.deepcopy(self)
+        ss.symmetry_name = self.symmetry_name #+ "_full_chains"
+        if ss.is_hf_based():
+            return self._add_hf_full_chains(ss)
+        elif ss.is_3f_based():
+            return self._add_3f_full_chains(ss)
+        elif ss.is_2f_based():
+            return self._add_2f_full_chains(ss)
+
+    def _add_2f_full_chains(self, ss):
+
+        mul = -1 if self.righthanded else 1
+
+        # First we make completly new 2-folds
+        ss_t = copy.deepcopy(self)
+        ss_t.apply_dofs()
+        orig = ss_t.get_vrt(f"VRT27fold1_z").vrt_orig
+
+        for r1, r2, r3, id_ in zip((0, 0, 0), (0, 180, 0), (mul*72, mul*72, -1 * mul * 72*2), ("X", "Y", "Z")):
+            R = rotation_matrix(orig, r1)
+            R2 = rotation_matrix(orig, r2)
+            R3 = rotation_matrix([0, 0, 1], r3)
+
+            f = "27"
+            # add vrts no
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z_tref", f"VRT{id_}fold1_z_tref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold", f"VRT{id_}fold").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1", f"VRT{id_}fold1").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z_rref", f"VRT{id_}fold1_z_rref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z", f"VRT{id_}fold1_z").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold11", f"VRT{id_}fold11").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x_tref", f"VRT{id_}fold111_x_tref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111", f"VRT{id_}fold111").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x_rref", f"VRT{id_}fold111_x_rref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x", f"VRT{id_}fold111_x").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_y_rref", f"VRT{id_}fold111_y_rref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_y", f"VRT{id_}fold111_y").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_z_rref", f"VRT{id_}fold111_z_rref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_z", f"VRT{id_}fold111_z").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_sds", f"VRT{id_}fold111_sds").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True))
+
+            # add vrts no
+            ss.add_jump(f"JUMP{id_}fold1_z_tref", f"VRTglobal", f"VRT{id_}fold1_z_tref")
+            ss.add_jump(f"JUMP{id_}fold", f"VRT{id_}fold1_z_tref", f"VRT{id_}fold")
+            ss.add_jump(f"JUMP{id_}fold1", f"VRT{id_}fold", f"VRT{id_}fold1")
+            ss.add_jump(f"JUMP{id_}fold1_z_rref", f"VRT{id_}fold1", f"VRT{id_}fold1_z_rref")
+            ss.add_jump(f"JUMP{id_}fold1_z", f"VRT{id_}fold1_z_rref", f"VRT{id_}fold1_z")
+            ss.add_jump(f"JUMP{id_}fold111_x_tref", f"VRT{id_}fold1_z", f"VRT{id_}fold111_x_tref")
+            ss.add_jump(f"JUMP{id_}fold11", f"VRT{id_}fold111_x_tref", f"VRT{id_}fold11")
+            ss.add_jump(f"JUMP{id_}fold111", f"VRT{id_}fold11", f"VRT{id_}fold111")
+            ss.add_jump(f"JUMP{id_}fold111_x_rref", f"VRT{id_}fold111", f"VRT{id_}fold111_x_rref")
+            ss.add_jump(f"JUMP{id_}fold111_x", f"VRT{id_}fold111_x_rref", f"VRT{id_}fold111_x")
+            ss.add_jump(f"JUMP{id_}fold111_y_rref", f"VRT{id_}fold111_x", f"VRT{id_}fold111_y_rref")
+            ss.add_jump(f"JUMP{id_}fold111_y", f"VRT{id_}fold111_y_rref", f"VRT{id_}fold111_y")
+            ss.add_jump(f"JUMP{id_}fold111_z_rref", f"VRT{id_}fold111_y", f"VRT{id_}fold111_z_rref")
+            ss.add_jump(f"JUMP{id_}fold111_z", f"VRT{id_}fold111_z_rref", f"VRT{id_}fold111_z")
+            ss.add_jump(f"JUMP{id_}fold111_sds", f"VRT{id_}fold111_z", f"VRT{id_}fold111_sds")
+            ss.add_jump(f"JUMP{id_}fold111_subunit", f"VRT{id_}fold111_sds", f"SUBUNIT")
+
+            ss._jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
+            ss._jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
+            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
+            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
+            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
+            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
+            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
+            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
+
+        for id_ in ("25", "23"):
+
+            ss_t = copy.deepcopy(self)
+            ss_t.apply_dofs()
+            orig = ss_t.get_vrt(f"VRT{id_}fold1_z").vrt_orig
+            R2 = rotation_matrix(orig, 180)
+
+            ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold111_x_tref", f"VRT{id_}fold121_x_tref").__getattribute__("rotate")(R2, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold11", f"VRT{id_}fold12").__getattribute__("rotate")(R2, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold111", f"VRT{id_}fold121").__getattribute__("rotate")(R2, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold111_x_rref", f"VRT{id_}fold121_x_rref").__getattribute__("rotate")(R2, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold111_x", f"VRT{id_}fold121_x").__getattribute__("rotate")(R2, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold111_y_rref", f"VRT{id_}fold121_y_rref").__getattribute__("rotate")(R2, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold111_y", f"VRT{id_}fold121_y").__getattribute__("rotate")(R2, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold111_z_rref", f"VRT{id_}fold121_z_rref").__getattribute__("rotate")(R2, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold111_z", f"VRT{id_}fold121_z").__getattribute__("rotate")(R2, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold111_sds", f"VRT{id_}fold121_sds").__getattribute__("rotate")(R2, True))
+
+            ss.add_jump(f"JUMP{id_}fold121_x_tref", f"VRT{id_}fold1_z", f"VRT{id_}fold121_x_tref")
+            ss.add_jump(f"JUMP{id_}fold12", f"VRT{id_}fold121_x_tref", f"VRT{id_}fold12")
+            ss.add_jump(f"JUMP{id_}fold121", f"VRT{id_}fold12", f"VRT{id_}fold121")
+            ss.add_jump(f"JUMP{id_}fold121_x_rref", f"VRT{id_}fold121", f"VRT{id_}fold121_x_rref")
+            ss.add_jump(f"JUMP{id_}fold121_x", f"VRT{id_}fold121_x_rref", f"VRT{id_}fold121_x")
+            ss.add_jump(f"JUMP{id_}fold121_y_rref", f"VRT{id_}fold121_x", f"VRT{id_}fold121_y_rref")
+            ss.add_jump(f"JUMP{id_}fold121_y", f"VRT{id_}fold121_y_rref", f"VRT{id_}fold121_y")
+            ss.add_jump(f"JUMP{id_}fold121_z_rref", f"VRT{id_}fold121_y", f"VRT{id_}fold121_z_rref")
+            ss.add_jump(f"JUMP{id_}fold121_z", f"VRT{id_}fold121_z_rref", f"VRT{id_}fold121_z")
+            ss.add_jump(f"JUMP{id_}fold121_sds", f"VRT{id_}fold121_z", f"VRT{id_}fold121_sds")
+            ss.add_jump(f"JUMP{id_}fold121_subunit", f"VRT{id_}fold121_sds", f"SUBUNIT")
+
+            # jumpgroups
+            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold121")
+            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold121_x")
+            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold121_y")
+            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold121_z")
+            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold121_sds")
+            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold121_subunit")
+
+
+        for f, final_angle, id_ in zip(("22", "25"), (mul*72*2, -1 * mul *72), ("T", "P")):
+
+            ss_t = copy.deepcopy(self)
+            ss_t.apply_dofs()
+            orig = ss_t.get_vrt(f"VRT{f}fold1_z").vrt_orig
+
+            # The angles to get
+            angle = vector_angle([0, 0, 1], orig)
+            rotvec = np.cross([0, 0, 1], orig)
+            other_fivefold = rotate(orig, rotation_matrix(rotvec, angle ))
+            R = rotation_matrix(other_fivefold, final_angle)
+
+            # add vrts n
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z_tref", f"VRT{id_}fold1_z_tref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold", f"VRT{id_}fold").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1", f"VRT{id_}fold1").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z_rref", f"VRT{id_}fold1_z_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z", f"VRT{id_}fold1_z").__getattribute__("rotate")(R, True))
+
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold12", f"VRT{id_}fold11").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x_tref", f"VRT{id_}fold111_x_tref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121", f"VRT{id_}fold111").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x_rref", f"VRT{id_}fold111_x_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x", f"VRT{id_}fold111_x").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_y_rref", f"VRT{id_}fold111_y_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_y", f"VRT{id_}fold111_y").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_z_rref", f"VRT{id_}fold111_z_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_z", f"VRT{id_}fold111_z").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_sds", f"VRT{id_}fold111_sds").__getattribute__("rotate")(R, True))
+
+            # add vrts no
+            ss.add_jump(f"JUMP{id_}fold1_z_tref", f"VRTglobal", f"VRT{id_}fold1_z_tref")
+            ss.add_jump(f"JUMP{id_}fold", f"VRT{id_}fold1_z_tref", f"VRT{id_}fold")
+            ss.add_jump(f"JUMP{id_}fold1", f"VRT{id_}fold", f"VRT{id_}fold1")
+            ss.add_jump(f"JUMP{id_}fold1_z_rref", f"VRT{id_}fold1", f"VRT{id_}fold1_z_rref")
+            ss.add_jump(f"JUMP{id_}fold1_z", f"VRT{id_}fold1_z_rref", f"VRT{id_}fold1_z")
+            ss.add_jump(f"JUMP{id_}fold111_x_tref", f"VRT{id_}fold1_z", f"VRT{id_}fold111_x_tref")
+            ss.add_jump(f"JUMP{id_}fold11", f"VRT{id_}fold111_x_tref", f"VRT{id_}fold11")
+            ss.add_jump(f"JUMP{id_}fold111", f"VRT{id_}fold11", f"VRT{id_}fold111")
+            ss.add_jump(f"JUMP{id_}fold111_x_rref", f"VRT{id_}fold111", f"VRT{id_}fold111_x_rref")
+            ss.add_jump(f"JUMP{id_}fold111_x", f"VRT{id_}fold111_x_rref", f"VRT{id_}fold111_x")
+            ss.add_jump(f"JUMP{id_}fold111_y_rref", f"VRT{id_}fold111_x", f"VRT{id_}fold111_y_rref")
+            ss.add_jump(f"JUMP{id_}fold111_y", f"VRT{id_}fold111_y_rref", f"VRT{id_}fold111_y")
+            ss.add_jump(f"JUMP{id_}fold111_z_rref", f"VRT{id_}fold111_y", f"VRT{id_}fold111_z_rref")
+            ss.add_jump(f"JUMP{id_}fold111_z", f"VRT{id_}fold111_z_rref", f"VRT{id_}fold111_z")
+            ss.add_jump(f"JUMP{id_}fold111_sds", f"VRT{id_}fold111_z", f"VRT{id_}fold111_sds")
+            ss.add_jump(f"JUMP{id_}fold111_subunit", f"VRT{id_}fold111_sds", f"SUBUNIT")
+
+            ss._jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
+            ss._jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
+            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
+            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
+            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
+            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
+            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
+            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
+
+        ss._set_init_vrts()
+        return ss
+
+    def _add_3f_full_chains(self, ss):
+
+        # First we make completly new 3-folds
+        ss_t = copy.deepcopy(self)
+        ss_t.apply_dofs()
+        orig = ss_t.get_vrt(f"VRT31fold1_z").vrt_orig
+        if ss.righthanded:
+            angle = -72 * 2
+            angle2 = 120
+        else:
+            angle = 72 * 2
+            angle2 = -120
+        for (r1, r2, r4), id_ in zip([(180, 120, -72), (180, -120, 72), (180, angle2, angle)], ["X", "Y", "Z"]):
+
+            # The angles to get for
+            a = vector_angle([0, 0, 1], orig)
+            c = math.degrees(math.pi / 2 - math.atan(1/2))
+            final_angle = 180 - a*2 - c
+            rotvec = np.cross([0, 0, 1], orig)
+            R = rotation_matrix(orig, r1)
+            R2 = rotation_matrix(orig, r2)
+            R3 = rotation_matrix(rotvec, final_angle)
+            R4 = rotation_matrix([0, 0, 1], r4)
+
+            f = "31"
+
+            # add vrts no
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z_tref", f"VRT{id_}fold1_z_tref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold", f"VRT{id_}fold").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1", f"VRT{id_}fold1").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z_rref", f"VRT{id_}fold1_z_rref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z", f"VRT{id_}fold1_z").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold11", f"VRT{id_}fold11").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x_tref", f"VRT{id_}fold111_x_tref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111", f"VRT{id_}fold111").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x_rref", f"VRT{id_}fold111_x_rref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x", f"VRT{id_}fold111_x").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_y_rref", f"VRT{id_}fold111_y_rref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_y", f"VRT{id_}fold111_y").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_z_rref", f"VRT{id_}fold111_z_rref").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_z", f"VRT{id_}fold111_z").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_sds", f"VRT{id_}fold111_sds").__getattribute__("rotate")(R, True).__getattribute__("rotate")(R2, True).__getattribute__("rotate")(R3, True).__getattribute__("rotate")(R4, True))
+
+            ss.add_jump(f"JUMP{id_}fold1_z_tref", f"VRTglobal", f"VRT{id_}fold1_z_tref")
+            ss.add_jump(f"JUMP{id_}fold", f"VRT{id_}fold1_z_tref", f"VRT{id_}fold")
+            ss.add_jump(f"JUMP{id_}fold1", f"VRT{id_}fold", f"VRT{id_}fold1")
+            ss.add_jump(f"JUMP{id_}fold1_z_rref", f"VRT{id_}fold1", f"VRT{id_}fold1_z_rref")
+            ss.add_jump(f"JUMP{id_}fold1_z", f"VRT{id_}fold1_z_rref", f"VRT{id_}fold1_z")
+            ss.add_jump(f"JUMP{id_}fold111_x_tref", f"VRT{id_}fold1_z", f"VRT{id_}fold111_x_tref")
+            ss.add_jump(f"JUMP{id_}fold11", f"VRT{id_}fold111_x_tref", f"VRT{id_}fold11")
+            ss.add_jump(f"JUMP{id_}fold111", f"VRT{id_}fold11", f"VRT{id_}fold111")
+            ss.add_jump(f"JUMP{id_}fold111_x_rref", f"VRT{id_}fold111", f"VRT{id_}fold111_x_rref")
+            ss.add_jump(f"JUMP{id_}fold111_x", f"VRT{id_}fold111_x_rref", f"VRT{id_}fold111_x")
+            ss.add_jump(f"JUMP{id_}fold111_y_rref", f"VRT{id_}fold111_x", f"VRT{id_}fold111_y_rref")
+            ss.add_jump(f"JUMP{id_}fold111_y", f"VRT{id_}fold111_y_rref", f"VRT{id_}fold111_y")
+            ss.add_jump(f"JUMP{id_}fold111_z_rref", f"VRT{id_}fold111_y", f"VRT{id_}fold111_z_rref")
+            ss.add_jump(f"JUMP{id_}fold111_z", f"VRT{id_}fold111_z_rref", f"VRT{id_}fold111_z")
+            ss.add_jump(f"JUMP{id_}fold111_sds", f"VRT{id_}fold111_z", f"VRT{id_}fold111_sds")
+            ss.add_jump(f"JUMP{id_}fold111_subunit", f"VRT{id_}fold111_sds", f"SUBUNIT")
+
+            ss._jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
+            ss._jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
+            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
+            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
+            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
+            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
+            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
+            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
+
+        # Now the rest we can add to existing 3-fodls
+        for f, id_, angle in zip(("33", "32", "34", "35"), ("L", "T", "K", "H"), (-120, 120, 120, -120)):
+
+            ss_t = copy.deepcopy(self)
+            ss_t.apply_dofs()
+            orig = ss_t.get_vrt(f"VRT{f}fold1_z").vrt_orig
+            R = rotation_matrix(orig, angle)
+
+            # add vrts no
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z_tref", f"VRT{id_}fold1_z_tref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold", f"VRT{id_}fold").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1", f"VRT{id_}fold1").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z_rref", f"VRT{id_}fold1_z_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z", f"VRT{id_}fold1_z").__getattribute__("rotate")(R, True))
+
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold11", f"VRT{id_}fold11").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x_tref", f"VRT{id_}fold111_x_tref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111", f"VRT{id_}fold111").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x_rref", f"VRT{id_}fold111_x_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x", f"VRT{id_}fold111_x").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_y_rref", f"VRT{id_}fold111_y_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_y", f"VRT{id_}fold111_y").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_z_rref", f"VRT{id_}fold111_z_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_z", f"VRT{id_}fold111_z").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_sds", f"VRT{id_}fold111_sds").__getattribute__("rotate")(R, True))
+
+            ss.add_jump(f"JUMP{id_}fold1_z_tref", f"VRTglobal", f"VRT{id_}fold1_z_tref")
+            ss.add_jump(f"JUMP{id_}fold", f"VRT{id_}fold1_z_tref", f"VRT{id_}fold")
+            ss.add_jump(f"JUMP{id_}fold1", f"VRT{id_}fold", f"VRT{id_}fold1")
+            ss.add_jump(f"JUMP{id_}fold1_z_rref", f"VRT{id_}fold1", f"VRT{id_}fold1_z_rref")
+            ss.add_jump(f"JUMP{id_}fold1_z", f"VRT{id_}fold1_z_rref", f"VRT{id_}fold1_z")
+            ss.add_jump(f"JUMP{id_}fold111_x_tref", f"VRT{id_}fold1_z", f"VRT{id_}fold111_x_tref")
+            ss.add_jump(f"JUMP{id_}fold11", f"VRT{id_}fold111_x_tref", f"VRT{id_}fold11")
+            ss.add_jump(f"JUMP{id_}fold111", f"VRT{id_}fold11", f"VRT{id_}fold111")
+            ss.add_jump(f"JUMP{id_}fold111_x_rref", f"VRT{id_}fold111", f"VRT{id_}fold111_x_rref")
+            ss.add_jump(f"JUMP{id_}fold111_x", f"VRT{id_}fold111_x_rref", f"VRT{id_}fold111_x")
+            ss.add_jump(f"JUMP{id_}fold111_y_rref", f"VRT{id_}fold111_x", f"VRT{id_}fold111_y_rref")
+            ss.add_jump(f"JUMP{id_}fold111_y", f"VRT{id_}fold111_y_rref", f"VRT{id_}fold111_y")
+            ss.add_jump(f"JUMP{id_}fold111_z_rref", f"VRT{id_}fold111_y", f"VRT{id_}fold111_z_rref")
+            ss.add_jump(f"JUMP{id_}fold111_z", f"VRT{id_}fold111_z_rref", f"VRT{id_}fold111_z")
+            ss.add_jump(f"JUMP{id_}fold111_sds", f"VRT{id_}fold111_z", f"VRT{id_}fold111_sds")
+            ss.add_jump(f"JUMP{id_}fold111_subunit", f"VRT{id_}fold111_sds", f"SUBUNIT")
+
+            ss._jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
+            ss._jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
+            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
+            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
+            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
+            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
+            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
+            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
+
+
+        ss._set_init_vrts()
+        return ss
+
+    def _add_hf_full_chains(self, ss):
+
+        # get the roration angles
+        if ss.righthanded:
+            angles1 = [-72, 72*2]
+            angles2 = [-72*2, None]
+            angle3 =  72
+            angle4 = -72 * 2
+        else:
+            angles1 = [72, -72*2]
+            angles2 = [72*2, None]
+            angle3 = -72
+            angle4 = 72 * 2
+
+        # Which fold to use
+        f = "2"
+
+        for id_, angle, angle2 in zip(["X", "Y"], angles1, angles2):
+
+            # rotate them
+            R = rotation_matrix([0, 0, 1], angle)
+
+            # add vrts no
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z_tref",  f"VRT{id_}fold1_z_tref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold", f"VRT{id_}fold").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1", f"VRT{id_}fold1").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z_rref", f"VRT{id_}fold1_z_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold1_z", f"VRT{id_}fold1_z").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x_tref",  f"VRT{id_}fold111_x_tref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold11", f"VRT{id_}fold11").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111", f"VRT{id_}fold111").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x_rref",  f"VRT{id_}fold111_x_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_x", f"VRT{id_}fold111_x").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_y_rref",f"VRT{id_}fold111_y_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_y", f"VRT{id_}fold111_y").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_z_rref", f"VRT{id_}fold111_z_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_z", f"VRT{id_}fold111_z").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold111_sds", f"VRT{id_}fold111_sds").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x_tref", f"VRT{id_}fold121_x_tref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold12", f"VRT{id_}fold12").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121", f"VRT{id_}fold121").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x_rref", f"VRT{id_}fold121_x_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x", f"VRT{id_}fold121_x").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_y_rref", f"VRT{id_}fold121_y_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_y", f"VRT{id_}fold121_y").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_z_rref", f"VRT{id_}fold121_z_rref").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_z", f"VRT{id_}fold121_z").__getattribute__("rotate")(R, True))
+            ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_sds", f"VRT{id_}fold121_sds").__getattribute__("rotate")(R, True))
+
+            # add jumps
+            ss.add_jump(f"JUMP{id_}fold1_z_tref", f"VRTglobal", f"VRT{id_}fold1_z_tref")
+            ss.add_jump(f"JUMP{id_}fold", f"VRT{id_}fold1_z_tref", f"VRT{id_}fold")
+            ss.add_jump(f"JUMP{id_}fold1", f"VRT{id_}fold", f"VRT{id_}fold1")
+            ss.add_jump(f"JUMP{id_}fold1_z_rref", f"VRT{id_}fold1", f"VRT{id_}fold1_z_rref")
+            ss.add_jump(f"JUMP{id_}fold1_z", f"VRT{id_}fold1_z_rref", f"VRT{id_}fold1_z")
+            ss.add_jump(f"JUMP{id_}fold111_x_tref", f"VRT{id_}fold1_z", f"VRT{id_}fold111_x_tref")
+            ss.add_jump(f"JUMP{id_}fold11", f"VRT{id_}fold111_x_tref", f"VRT{id_}fold11")
+            ss.add_jump(f"JUMP{id_}fold111", f"VRT{id_}fold11", f"VRT{id_}fold111")
+            ss.add_jump(f"JUMP{id_}fold111_x_rref", f"VRT{id_}fold111", f"VRT{id_}fold111_x_rref")
+            ss.add_jump(f"JUMP{id_}fold111_x", f"VRT{id_}fold111_x_rref", f"VRT{id_}fold111_x")
+            ss.add_jump(f"JUMP{id_}fold111_y_rref", f"VRT{id_}fold111_x", f"VRT{id_}fold111_y_rref")
+            ss.add_jump(f"JUMP{id_}fold111_y", f"VRT{id_}fold111_y_rref", f"VRT{id_}fold111_y")
+            ss.add_jump(f"JUMP{id_}fold111_z_rref", f"VRT{id_}fold111_y", f"VRT{id_}fold111_z_rref")
+            ss.add_jump(f"JUMP{id_}fold111_z", f"VRT{id_}fold111_z_rref", f"VRT{id_}fold111_z")
+            ss.add_jump(f"JUMP{id_}fold111_sds", f"VRT{id_}fold111_z", f"VRT{id_}fold111_sds")
+            ss.add_jump(f"JUMP{id_}fold111_subunit", f"VRT{id_}fold111_sds", f"SUBUNIT")
+            ss.add_jump(f"JUMP{id_}fold121_x_tref", f"VRT{id_}fold1_z", f"VRT{id_}fold121_x_tref")
+            ss.add_jump(f"JUMP{id_}fold12", f"VRT{id_}fold121_x_tref", f"VRT{id_}fold12")
+            ss.add_jump(f"JUMP{id_}fold121", f"VRT{id_}fold12", f"VRT{id_}fold121")
+            ss.add_jump(f"JUMP{id_}fold121_x_rref", f"VRT{id_}fold121", f"VRT{id_}fold121_x_rref")
+            ss.add_jump(f"JUMP{id_}fold121_x", f"VRT{id_}fold121_x_rref", f"VRT{id_}fold121_x")
+            ss.add_jump(f"JUMP{id_}fold121_y_rref", f"VRT{id_}fold121_x", f"VRT{id_}fold121_y_rref")
+            ss.add_jump(f"JUMP{id_}fold121_y",  f"VRT{id_}fold121_y_rref", f"VRT{id_}fold121_y")
+            ss.add_jump(f"JUMP{id_}fold121_z_rref", f"VRT{id_}fold121_y", f"VRT{id_}fold121_z_rref")
+            ss.add_jump(f"JUMP{id_}fold121_z", f"VRT{id_}fold121_z_rref", f"VRT{id_}fold121_z")
+            ss.add_jump(f"JUMP{id_}fold121_sds", f"VRT{id_}fold121_z", f"VRT{id_}fold121_sds")
+            ss.add_jump(f"JUMP{id_}fold121_subunit", f"VRT{id_}fold121_sds", f"SUBUNIT")
+
+            # jumpgroups
+            ss._jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
+            ss._jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
+            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
+            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold121")
+            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
+            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold121_x")
+            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
+            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold121_y")
+            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
+            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold121_z")
+            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
+            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold121_sds")
+            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
+            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold121_subunit")
+
+            if angle2 is not None:
+
+                # add one more more in the
+                R2 = rotation_matrix(ss.get_vrt(f"VRT{id_}fold111").vrt_z, angle2)
+                ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold121_x_tref", f"VRT{id_}fold131_x_tref").__getattribute__("rotate")(R2, True))
+                ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold12", f"VRT{id_}fold13").__getattribute__("rotate")(R2, True))
+                ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold121", f"VRT{id_}fold131").__getattribute__("rotate")(R2, True))
+                ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold121_x_rref", f"VRT{id_}fold131_x_rref").__getattribute__("rotate")(R2, True))
+                ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold121_x", f"VRT{id_}fold131_x").__getattribute__("rotate")(R2, True))
+                ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold121_y_rref", f"VRT{id_}fold131_y_rref").__getattribute__("rotate")(R2, True))
+                ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold121_y", f"VRT{id_}fold131_y").__getattribute__("rotate")(R2, True))
+                ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold121_z_rref", f"VRT{id_}fold131_z_rref").__getattribute__("rotate")(R2, True))
+                ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold121_z", f"VRT{id_}fold131_z").__getattribute__("rotate")(R2, True))
+                ss.add_vrt(ss.copy_vrt(f"VRT{id_}fold121_sds", f"VRT{id_}fold131_sds").__getattribute__("rotate")(R2, True))
+
+                ss.add_jump(f"JUMP{id_}fold131_x_tref", f"VRT{id_}fold1_z", f"VRT{id_}fold131_x_tref")
+                ss.add_jump(f"JUMP{id_}fold13", f"VRT{id_}fold131_x_tref", f"VRT{id_}fold13")
+                ss.add_jump(f"JUMP{id_}fold131", f"VRT{id_}fold13", f"VRT{id_}fold131")
+                ss.add_jump(f"JUMP{id_}fold131_x_rref", f"VRT{id_}fold131", f"VRT{id_}fold131_x_rref")
+                ss.add_jump(f"JUMP{id_}fold131_x", f"VRT{id_}fold131_x_rref", f"VRT{id_}fold131_x")
+                ss.add_jump(f"JUMP{id_}fold131_y_rref", f"VRT{id_}fold131_x", f"VRT{id_}fold131_y_rref")
+                ss.add_jump(f"JUMP{id_}fold131_y", f"VRT{id_}fold131_y_rref", f"VRT{id_}fold131_y")
+                ss.add_jump(f"JUMP{id_}fold131_z_rref", f"VRT{id_}fold131_y", f"VRT{id_}fold131_z_rref")
+                ss.add_jump(f"JUMP{id_}fold131_z", f"VRT{id_}fold131_z_rref", f"VRT{id_}fold131_z")
+                ss.add_jump(f"JUMP{id_}fold131_sds", f"VRT{id_}fold131_z", f"VRT{id_}fold131_sds")
+                ss.add_jump(f"JUMP{id_}fold131_subunit", f"VRT{id_}fold131_sds", f"SUBUNIT")
+
+                # jumpgroups
+                ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold131")
+                ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold131_x")
+                ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold131_y")
+                ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold131_z")
+                ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold131_sds")
+                ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold131_subunit")
+
+        # i also want to add a new
+        # in the 2_fold
+
+        # add one more more in the
+        f = "3"
+        R3 = rotation_matrix(ss.get_vrt(f"VRT{f}fold111").vrt_z, angle3)
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x_tref", f"VRT{f}fold131_x_tref").__getattribute__("rotate")(R3, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold12", f"VRT{f}fold13").__getattribute__("rotate")(R3, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121", f"VRT{f}fold131").__getattribute__("rotate")(R3, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x_rref", f"VRT{f}fold131_x_rref").__getattribute__("rotate")(R3, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x", f"VRT{f}fold131_x").__getattribute__("rotate")(R3, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_y_rref", f"VRT{f}fold131_y_rref").__getattribute__("rotate")(R3, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_y", f"VRT{f}fold131_y").__getattribute__("rotate")(R3, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_z_rref", f"VRT{f}fold131_z_rref").__getattribute__("rotate")(R3, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_z", f"VRT{f}fold131_z").__getattribute__("rotate")(R3, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_sds", f"VRT{f}fold131_sds").__getattribute__("rotate")(R3, True))
+
+        ss.add_jump(f"JUMP{f}fold131_x_tref", f"VRT{f}fold1_z", f"VRT{f}fold131_x_tref")
+        ss.add_jump(f"JUMP{f}fold13", f"VRT{f}fold131_x_tref", f"VRT{f}fold13")
+        ss.add_jump(f"JUMP{f}fold131", f"VRT{f}fold13", f"VRT{f}fold131")
+        ss.add_jump(f"JUMP{f}fold131_x_rref", f"VRT{f}fold131", f"VRT{f}fold131_x_rref")
+        ss.add_jump(f"JUMP{f}fold131_x", f"VRT{f}fold131_x_rref", f"VRT{f}fold131_x")
+        ss.add_jump(f"JUMP{f}fold131_y_rref", f"VRT{f}fold131_x", f"VRT{f}fold131_y_rref")
+        ss.add_jump(f"JUMP{f}fold131_y", f"VRT{f}fold131_y_rref", f"VRT{f}fold131_y")
+        ss.add_jump(f"JUMP{f}fold131_z_rref", f"VRT{f}fold131_y", f"VRT{f}fold131_z_rref")
+        ss.add_jump(f"JUMP{f}fold131_z", f"VRT{f}fold131_z_rref", f"VRT{f}fold131_z")
+        ss.add_jump(f"JUMP{f}fold131_sds", f"VRT{f}fold131_z", f"VRT{f}fold131_sds")
+        ss.add_jump(f"JUMP{f}fold131_subunit", f"VRT{f}fold131_sds", f"SUBUNIT")
+
+        # jumpgroups
+        ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{f}fold131")
+        ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{f}fold131_x")
+        ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{f}fold131_y")
+        ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{f}fold131_z")
+        ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{f}fold131_sds")
+        ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{f}fold131_subunit")
+
+        # add one more more in the
+        f = "2"
+        R4 = rotation_matrix(ss.get_vrt(f"VRT{f}fold111").vrt_z, angle4)
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x_tref", f"VRT{f}fold131_x_tref").__getattribute__("rotate")(R4, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold12", f"VRT{f}fold13").__getattribute__("rotate")(R4, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121", f"VRT{f}fold131").__getattribute__("rotate")(R4, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x_rref", f"VRT{f}fold131_x_rref").__getattribute__("rotate")(R4, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_x", f"VRT{f}fold131_x").__getattribute__("rotate")(R4, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_y_rref", f"VRT{f}fold131_y_rref").__getattribute__("rotate")(R4, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_y", f"VRT{f}fold131_y").__getattribute__("rotate")(R4, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_z_rref", f"VRT{f}fold131_z_rref").__getattribute__("rotate")(R4, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_z", f"VRT{f}fold131_z").__getattribute__("rotate")(R4, True))
+        ss.add_vrt(ss.copy_vrt(f"VRT{f}fold121_sds", f"VRT{f}fold131_sds").__getattribute__("rotate")(R4, True))
+
+        ss.add_jump(f"JUMP{f}fold131_x_tref", f"VRT{f}fold1_z", f"VRT{f}fold131_x_tref")
+        ss.add_jump(f"JUMP{f}fold13", f"VRT{f}fold131_x_tref", f"VRT{f}fold13")
+        ss.add_jump(f"JUMP{f}fold131", f"VRT{f}fold13", f"VRT{f}fold131")
+        ss.add_jump(f"JUMP{f}fold131_x_rref", f"VRT{f}fold131", f"VRT{f}fold131_x_rref")
+        ss.add_jump(f"JUMP{f}fold131_x", f"VRT{f}fold131_x_rref", f"VRT{f}fold131_x")
+        ss.add_jump(f"JUMP{f}fold131_y_rref", f"VRT{f}fold131_x", f"VRT{f}fold131_y_rref")
+        ss.add_jump(f"JUMP{f}fold131_y", f"VRT{f}fold131_y_rref", f"VRT{f}fold131_y")
+        ss.add_jump(f"JUMP{f}fold131_z_rref", f"VRT{f}fold131_y", f"VRT{f}fold131_z_rref")
+        ss.add_jump(f"JUMP{f}fold131_z", f"VRT{f}fold131_z_rref", f"VRT{f}fold131_z")
+        ss.add_jump(f"JUMP{f}fold131_sds", f"VRT{f}fold131_z", f"VRT{f}fold131_sds")
+        ss.add_jump(f"JUMP{f}fold131_subunit", f"VRT{f}fold131_sds", f"SUBUNIT")
+
+        # jumpgroups
+        ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{f}fold131")
+        ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{f}fold131_x")
+        ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{f}fold131_y")
+        ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{f}fold131_z")
+        ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{f}fold131_sds")
+        ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{f}fold131_subunit")
+
+        ss._set_init_vrts()
+        return ss
