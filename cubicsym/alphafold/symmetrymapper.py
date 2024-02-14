@@ -38,7 +38,7 @@ class SymmetryMapper:
         :param rosetta_path: Path to the Rosetta folder.
         :param flip_from_first_apply: Sets the flip direction based on the first structure that is parsed to the
         """
-        self.make_symdef_file_path = str(Path(__file__).resolve().parent.parent.parent.joinpath("scripts/make_symmdef_file.pl"))
+        self.make_symdef_file_path = "make_symmdef_file.pl"
         self.tmp_file_dir = tempfile.gettempdir()
         self.matcher = Matcher()
 
@@ -308,7 +308,6 @@ class SymmetryMapper:
     def find_combos(self, pose, cn, return_df=False, main_chains_allowed=None, check_for_point_symmetry=False):
         """Finds the best chain combination (see class documentation) for a given cn symmetry. There's an option to return a
         pandas DateFrame containing all information gathered throughout the selection."""
-        print(f"Using the symmetry script defined here: {self.make_symdef_file_path}")
         tmp_file = f"{self.tmp_file_dir}/{uuid.uuid4()}.pdb"
         pose.dump_pdb(tmp_file)  # write pose to tmp_file
         combo_info = {"combo": [], "success": [], "tmscore": [], "total_rmsd": [], "chain_matches_int": [],
