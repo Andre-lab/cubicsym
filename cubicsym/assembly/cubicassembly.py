@@ -6,6 +6,7 @@ CubicSymmetricAssembly class
 @Date: 4/6/22
 """
 import numpy as np
+from pyrosetta.rosetta.core.pose.symmetry import is_symmetric
 import time
 import math
 import difflib
@@ -27,12 +28,14 @@ from pyrosetta.rosetta.core.pose.symmetry import extract_asymmetric_unit
 from Bio.PDB.PDBParser import PDBParser
 from Bio.PDB.Model import Model
 from pathlib import Path
+import tempfile
 
 class CubicSymmetricAssembly(Assembly):
     """Cubic symmetrical assembly of either I, O or T symmetry. Has additional methods from a regular assembly related to symmetry."""
 
     def __init__(self, mmcif_file=None, mmcif_symmetry: str = "1", force_symmetry=None, start_rmsd_diff=0.5, start_angles_diff=2.0, id_="1",
-                 rmsd_diff_increment=1, angle_diff_increment=2, total_increments=5, rosetta_units=None, ignore_chains=None):
+                 rmsd_diff_increment=1, angle_diff_increment=2, total_increments=5, rosetta_units=None, ignore_chains=None,
+                 use_full=False, model_together=False):
         """Initialization of an instance from an mmCIF file and either a specified symmetry or assembly id.
 
         :param mmcif_file: mmCIF file to create the assembly from.
@@ -54,7 +57,7 @@ class CubicSymmetricAssembly(Assembly):
         """
         assert mmcif_symmetry in ("I", "O", "T") or mmcif_symmetry.isdigit(), \
             "symmetry definition is wrong. Has to be either I, O, T or a number exclusively."
-        super().__init__(mmcif_file, mmcif_symmetry if mmcif_symmetry.isdigit() else "1", id_, rosetta_units, ignore_chains)
+        super().__init__(mmcif_file, mmcif_symmetry if mmcif_symmetry.isdigit() else "1", id_, rosetta_units, ignore_chains, use_full, model_together)
         self.intrinsic_perfect_symmetry = None
         self.idealized_symmetry = None
         self.start_rmsd_diff = start_rmsd_diff
@@ -77,7 +80,7 @@ class CubicSymmetricAssembly(Assembly):
                 self.find_symmetry(mmcif_file, mmcif_symmetry)
 
     @classmethod
-    def helle(cls, pose, input_file, setup, n_chains):
+    def _extract_symmetric_info(cls, pose, setup, n_chains, input_file=None):
         new_pose = Pose()
         extract_asymmetric_unit(pose, new_pose, False)
         # create a Model from the symmetrized pose master subunit
@@ -89,7 +92,15 @@ class CubicSymmetricAssembly(Assembly):
         p = PDBParser(PERMISSIVE=1)
         buffer = ostringstream()
         new_pose.dump_pdb(buffer)
-        structure = p.get_structure(input_file, StringIO(buffer.str()))
+        if input_file is not None and isinstance(input_file, str):
+            structure = p.get_structure(input_file, StringIO(buffer.str()))
+        elif input_file is None:
+            with tempfile.TemporaryFile() as asym_pose_file:
+                apose = setup.make_asymmetric_pose(pose)
+                apose.dump_pdb(str(asym_pose_file))
+                structure = p.get_structure(asym_pose_file, StringIO(buffer.str()))
+        else:
+            raise ValueError
         # construct an emtpy CubicSymmetricAssembly class
         cass = cls()
         cass.symmetry = cass.determine_cubic_symmetry_from_setup(setup)
@@ -106,6 +117,94 @@ class CubicSymmetricAssembly(Assembly):
             master.add(chain)
         cass.add(master)
         return cass, hf, angle, master, count, chain_ids
+
+    @classmethod
+    def from_pose_input(cls, pose, setup, half_capsid_only=False):
+        """Initialize an instance from a pose and a CubicSetup. If no symdef file is given,
+        assume that the symdef information is stored in a SYMMETRY line in the input file."""
+        # create and symmetrize a pose.
+        assert is_symmetric(pose)
+        n_chains = pose.num_chains()
+        if not setup.is_hf_based():
+            from cubicsym.actors.symdefswapper import SymDefSwapper
+            sds = SymDefSwapper(pose, setup)
+            setup = sds.foldHF_setup
+            pose = sds.create_hffold_pose(pose)
+        cass, hf, angle, master, count, chain_ids = cls._extract_symmetric_info(pose, setup, n_chains)
+        z1high = -setup.get_vrt("VRTHFfold")._vrt_z
+        z2high = -setup.get_vrt("VRT2fold")._vrt_z
+        z3high = -setup.get_vrt("VRT3fold")._vrt_z
+        #     z1high = -setup.get_vrt("VRT31fold")._vrt_z
+        #     z2high = -setup.get_vrt("VRT32fold")._vrt_z
+        #     z3high = -setup.get_vrt("VRT3fold")._vrt_z
+        # elif setup.is_3f_based():
+        #     z1high = -setup.get_vrt("VRT21fold")._vrt_z
+        #     z2high = -setup.get_vrt("VRT32fold")._vrt_z
+        #     z3high = -setup.get_vrt("VRT3fold")._vrt_z
+        # 1. Make high fold around master
+        for i in range(1, hf):
+            new_subunit = Model(f"{next(count)}")
+            for chain in master.get_chains():
+                new_chain = chain.copy()
+                new_chain.transform(rotation_matrix(z1high, angle * i), [0, 0, 0])
+                new_chain.id = next(chain_ids)
+                new_subunit.add(new_chain)
+            cass.add(new_subunit)
+        # 2. Make the 2-fold subunit and rotate it around its two-fold axis
+        new_subunit = Model(f"{next(count)}")
+        for chain in master.get_chains():
+            new_chain = chain.copy()
+            new_chain.transform(rotation_matrix( z1high + z2high, 180), [0, 0, 0])
+            new_chain.id = next(chain_ids)
+            new_subunit.add(new_chain)
+        cass.add(new_subunit)
+        # 3. Make the surrounding 5-folds of the 2-fold subunit first and the rest of them (#hf)
+        for i in range(1, hf):
+            new_subunit = Model(f"{next(count)}")
+            for chain in cass.get_subunits(ids=f"{hf+1}")[0].get_chains():
+                new_chain = chain.copy()
+                new_chain.transform(rotation_matrix(z2high, angle * i), [0, 0, 0])
+                new_chain.id = next(chain_ids)
+                new_subunit.add(new_chain)
+            cass.add(new_subunit)
+        for i in range(1, hf):
+            for subunit in cass.get_subunits(ids = tuple(map(str, range(hf+1, hf*2+1)))):
+                new_subunit = Model(f"{next(count)}")
+                for chain in subunit.get_chains():
+                    new_chain = chain.copy()
+                    new_chain.transform(rotation_matrix(z1high, angle * i), [0, 0, 0])
+                    new_chain.id = next(chain_ids)
+                    new_subunit.add(new_chain)
+                cass.add(new_subunit)
+        # For T we are done but for I and O we need a little more
+        vec1 = z2high + ((z3high - z2high) / 2.0)  # a vector from midlle of the 2-fold/hf-fold axis to the 3-fold/hf-fold axis
+        if cass.symmetry == "O":
+            rotation_for_O = rotation_matrix(vec1, 180.0)
+            for subunit in cass.get_subunits(ids=("1", "2", "3", "4"))[:]:
+                new_subunit = Model(f"{next(count)}")
+                for chain in subunit.get_chains():
+                    new_chain = chain.copy()
+                    new_chain.transform(rotation_for_O, [0, 0, 0])
+                    new_chain.id = next(chain_ids)
+                    new_subunit.add(new_chain)
+                cass.add(new_subunit)
+        elif cass.symmetry == "I":
+            if half_capsid_only:
+                return cass
+            # before the loops we create vectors that are important for rotating half the capsid
+            vec2 = np.dot(z1high, rotation_matrix(np.cross(vec1, z1high), vector_angle(z1high, vec1) * 2))  # points to another 5-fold axis just below the 3/2-fold/hf-fold-axis
+            vec3 = vec2 + ((z2high - vec2) / 2.0)  # points bewteen the 3-fold axis and the above hf-fold axis
+            rotation_for_I = rotation_matrix(vec3, 180.0)
+            for subunit in cass.get_subunits()[:]:
+                new_subunit = Model(f"{next(count)}")
+                for chain in subunit.get_chains():
+                    new_chain = chain.copy()
+                    new_chain.transform(rotation_for_I, [0, 0, 0])
+                    new_chain.id = next(chain_ids)
+                    new_subunit.add(new_chain)
+                cass.add(new_subunit)
+            # need a twofold rotation
+        return cass
 
     @classmethod
     def from_rosetta_input(cls, input_file, symdef_file=None):
@@ -130,7 +229,7 @@ class CubicSymmetricAssembly(Assembly):
             sds = SymDefSwapper(pose, setup)
             setup = sds.foldHF_setup
             pose = sds.create_hffold_pose(pose)
-        cass, hf, angle, master, count, chain_ids = cls.helle(pose, input_file, setup, n_chains)
+        cass, hf, angle, master, count, chain_ids = cls._extract_symmetric_info(pose, setup, n_chains, input_file)
         z1high = -setup.get_vrt("VRTHFfold")._vrt_z
         z2high = -setup.get_vrt("VRT2fold")._vrt_z
         z3high = -setup.get_vrt("VRT3fold")._vrt_z
@@ -674,7 +773,7 @@ class CubicSymmetricAssembly(Assembly):
 
 
         # plane defined by 5 fold vectors
-        # from shapedesign.src.movers.hypotenusemover import HypotenuseMover
+        # from shapedesign.source.movers.hypotenusemover import HypotenuseMover
         # from pyrosetta.rosetta.core.import_pose import pose_from_pdbstring
         # # Should apply on the asymmetric unit!
         # pose = Pose()
