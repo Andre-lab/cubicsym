@@ -26,7 +26,7 @@ from Bio.Align.Applications import MafftCommandline
 from symmetryhandler.mathfunctions import rotation_matrix, vector_angle, vector_projection, rotate, vector_projection_on_subspace
 from cubicsym.mathfunctions import distance
 from string import ascii_lowercase, ascii_uppercase
-from Bio.PDB.Polypeptide import is_aa, three_to_one
+from Bio.PDB.Polypeptide import is_aa, index_to_one, three_to_index
 from Bio.PDB.Structure import Structure
 from Bio.PDB.vectors import Vector
 from cubicsym.mathfunctions import distance, vector
@@ -658,7 +658,7 @@ class Assembly(Structure):
     def _write_fasta(self, out, wrap=80):
         with open(out, "w") as f:
             for subunit in self.get_subunits():
-                seq = "".join([three_to_one(i.get_resname()) for i in subunit.get_residues() if is_aa(i, standard=True)])
+                seq = "".join([index_to_one(three_to_index(i.get_resname()) for i in subunit.get_residues() if is_aa(i, standard=True)])
                 f.write(f">{subunit.id}\n")
                 for seq_line in [seq[i:i + wrap] for i in range(0, len(seq), wrap)]:
                     f.write(f"{seq_line}\n")
