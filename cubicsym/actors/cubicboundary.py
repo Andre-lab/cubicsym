@@ -9,8 +9,6 @@ from copy import deepcopy
 import math
 from pyrosetta.rosetta.core.id import AtomID
 from pyrosetta.rosetta.core.scoring.constraints import AngleConstraint, AtomPairConstraint, BoundFunc, DihedralConstraint
-from cubicsym.actors.rigidbodydofadaptivemover import RigidBodyDofAdaptiveMover
-from cubicsym.actors.rigidvodyexperimentalmover import RigidBodyExperimentalMover
 from cubicsym.actors.rigidbodycombinedmover import RigidBodyCombinedMover
 from pyrosetta.rosetta.core.scoring.func import SquareWellFunc
 from pyrosetta.rosetta.core.pose.symmetry import sym_dof_jump_num
@@ -406,18 +404,6 @@ class CubicBoundary:
                                 set_jumpdof_str_str(pose, jump_name, dof_name, min_bound + self.buffer)
                             if current_val >= max_bound:
                                 set_jumpdof_str_str(pose, jump_name, dof_name, max_bound - self.buffer)
-
-    def construct_rigidbodydofadaptive_mover(self, pose, cubicboundary, rb_name="") -> RigidBodyDofAdaptiveMover:
-        """Construct rigidbodymover."""
-        rb_mover = RigidBodyDofAdaptiveMover(rb_name, cubicboundary)
-        self.current_positions = self.dof_spec.get_positions_as_dict_str_str(pose)
-        for jump_name, jumpdof_params in self.dof_spec.dof_spec.items():
-            for dof_name, dof_params in jumpdof_params.items():
-                # print(*self.get_extra_options(pose, jump_name, dof_name, dof_params))
-                extra_options = self.get_extra_options(pose, jump_name, dof_name, dof_params)
-                # print(jump_name, dof_name, extra_options)
-                rb_mover.add_jump(pose, jump_name, self.hack_map[dof_name], *extra_options)
-        return rb_mover
 
     def construct_rigidbodycombined_mover(self, cubicboundary):
         rb_mover = RigidBodyCombinedMover(cubicboundary)
