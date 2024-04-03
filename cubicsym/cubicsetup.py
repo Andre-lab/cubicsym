@@ -92,7 +92,7 @@ class CubicSetup(SymmetrySetup):
             raise AssertionError(f"The anchor residue coordinates is {anchor_pos}, but should be be overlayed with VRT{jid}fold111_sds at {sds_pos}")
 
     @staticmethod
-    def is_fully_protected(pose):
+    def has_extra_chains(pose):
         return pose.num_chains() == 16 + 1
 
     @staticmethod
@@ -2950,17 +2950,18 @@ class CubicSetup(SymmetrySetup):
         return ss2
 
 
-    def add_full_chains(self):
+    def add_extra_chains(self):
         ss = copy.deepcopy(self)
         ss.symmetry_name = self.symmetry_name #+ "_full_chains"
+        ss._set_vrts_to_init_vrts()
         if ss.is_hf_based():
-            return self._add_hf_full_chains(ss)
+            return self._add_hf_extra_chains(ss)
         elif ss.is_3f_based():
-            return self._add_3f_full_chains(ss)
+            return self._add_3f_extra_chains(ss)
         elif ss.is_2f_based():
-            return self._add_2f_full_chains(ss)
+            return self._add_2f_extra_chains(ss)
 
-    def _add_2f_full_chains(self, ss):
+    def _add_2f_extra_chains(self, ss):
 
         mul = -1 if self.righthanded else 1
 
@@ -2968,6 +2969,12 @@ class CubicSetup(SymmetrySetup):
         ss_t = copy.deepcopy(self)
         ss_t.apply_dofs()
         orig = ss_t.get_vrt(f"VRT27fold1_z").vrt_orig
+
+        # modify the energy term!
+        new_3F = " + ".join(f"60*(VRTHFfold111_sds:VRT{i}fold{j}_sds)" for i, j in
+                            zip(["25", "X", "23", "Z", "T", "Y"], ["121", "111", "121", "111", "111", "111"]))
+        new_2F = " + ".join(f"30*(VRTHFfold111_sds:VRT{i}fold{j}_sds)" for i, j in zip(["P"], ["111"]))
+        ss.energies += f" + {new_3F} + {new_2F}"
 
         for r1, r2, r3, id_ in zip((0, 0, 0), (0, 180, 0), (mul*72, mul*72, -1 * mul * 72*2), ("X", "Y", "Z")):
             R = rotation_matrix(orig, r1)
@@ -3119,7 +3126,7 @@ class CubicSetup(SymmetrySetup):
         ss._set_init_vrts()
         return ss
 
-    def _add_3f_full_chains(self, ss):
+    def _add_3f_extra_chains(self, ss):
 
         # First we make completly new 3-folds
         ss_t = copy.deepcopy(self)
@@ -3131,6 +3138,20 @@ class CubicSetup(SymmetrySetup):
         else:
             angle = 72 * 2
             angle2 = -120
+
+        # modify the energy term!
+        # this depends on if it is righthanded or not
+
+        if ss.righthanded:
+            new_3F = " + ".join(f"60*(VRTHFfold111_sds:VRT{i}fold{j}_sds)" for i, j in
+                                zip(["L", "T", "H", "K", "Y", "X"], ["111", "111", "111", "111", "111", "111"]))
+            new_2F = " + ".join(f"30*(VRTHFfold111_sds:VRT{i}fold{j}_sds)" for i, j in zip(["Z"], ["111"]))
+        else:
+            new_3F = " + ".join(f"60*(VRTHFfold111_sds:VRT{i}fold{j}_sds)" for i, j in
+                                zip(["K", "H", "T", "L", "X", "Y"], ["111", "111", "111", "111", "111", "111"]))
+            new_2F = " + ".join(f"30*(VRTHFfold111_sds:VRT{i}fold{j}_sds)" for i, j in zip(["Z"], ["111"]))
+        ss.energies += f" + {new_3F} + {new_2F}"
+
         for (r1, r2, r4), id_ in zip([(180, 120, -72), (180, -120, 72), (180, angle2, angle)], ["X", "Y", "Z"]):
 
             # The angles to get for
@@ -3245,7 +3266,7 @@ class CubicSetup(SymmetrySetup):
         ss._set_init_vrts()
         return ss
 
-    def _add_hf_full_chains(self, ss):
+    def _add_hf_extra_chains(self, ss):
 
         # get the roration angles
         if ss.righthanded:
@@ -3258,6 +3279,11 @@ class CubicSetup(SymmetrySetup):
             angles2 = [72*2, None]
             angle3 = -72
             angle4 = 72 * 2
+
+        # modify the energy term!
+        new_3F = " + ".join(f"60*(VRTHFfold111_sds:VRT{i}fold{j}_sds)" for i, j in zip(["X", "X", "Y", "Y", "3", "2"], ["111", "121", "111", "121", "131", "131"]))
+        new_2F = " + ".join(f"30*(VRTHFfold111_sds:VRT{i}fold{j}_sds)" for i, j in zip(["X"], ["131"]))
+        ss.energies += f" + {new_3F} + {new_2F}"
 
         # Which fold to use
         f = "2"

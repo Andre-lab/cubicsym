@@ -154,9 +154,9 @@ import warnings
 
 # todo: This should inherit from SymmmetrySlider
 class CubicSymmetrySlider:
-    """A slider or cubic symmetries"""
+    """A slider of cubic symmetries"""
 
-    def __init__(self, pose, symmetry_file, ccsc: CloudContactScoreContainer, visualizer=None, native=None, trans_mag=0.3, pymolmover=None, max_slide_attempts=100,
+    def __init__(self, pose, cubicsetup, ccsc: CloudContactScoreContainer, visualizer=None, native=None, trans_mag=0.3, pymolmover=None, max_slide_attempts=500,
                  cubicboundary=None, set_within_bounds_first=False, debug_mode=False):
         assert is_symmetric(pose)
         self.trans_mag = trans_mag
@@ -171,10 +171,10 @@ class CubicSymmetrySlider:
         self.native = native
         self.move_x = False
         self.move_z = False
-        self.sds = SymDefSwapper(pose, symmetry_file, debug_mode=False) # debug_mode)
+        self.cubicsetup = cubicsetup
+        self.sds = SymDefSwapper(pose, cubicsetup)
         self.cubicboundary = cubicboundary
         self.set_within_bounds_first = set_within_bounds_first
-        self.cubicsetup = CubicSetup(symmetry_file)
         self.debug_mode = debug_mode
         self.hf_hit = None
         self.f3_hit = None
@@ -211,6 +211,7 @@ class CubicSymmetrySlider:
             self.visualize(pose)
             slide_moves += 1
             if slide_moves >= max_slide_attempts:
+                print(f"Max_slide_attempts={max_slide_attempts} hit! Returning to initial position")
                 self.slide_z(pose, slide_dir * -1 * slide_moves, trans_mag, foldid) # go back to the previous location when the function was called
                 return False, slide_moves
         if moved:
@@ -310,7 +311,7 @@ class CubicSymmetrySlider:
         else:
             assert pose_HF is pose_X, "pose_HF and pose_X should reference the same object"
 
-        if not self.cubicboundary.all_dofs_within_bounds(pose_X):
+        if self.cubicboundary is not None and self.cubicboundary.all_dofs_within_bounds(pose_X):
             pose_X.assign(pose_X_org)
 
     def get_last_hit_status(self):

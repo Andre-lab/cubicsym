@@ -9,15 +9,15 @@ from copy import deepcopy
 import math
 from pyrosetta.rosetta.core.id import AtomID
 from pyrosetta.rosetta.core.scoring.constraints import AngleConstraint, AtomPairConstraint, BoundFunc, DihedralConstraint
-# from pyrosetta.rosetta.protocols.rigid import RigidBodyDofAdaptiveMover
 from cubicsym.actors.rigidbodydofadaptivemover import RigidBodyDofAdaptiveMover
+from cubicsym.actors.rigidvodyexperimentalmover import RigidBodyExperimentalMover
+from cubicsym.actors.rigidbodycombinedmover import RigidBodyCombinedMover
 from pyrosetta.rosetta.core.scoring.func import SquareWellFunc
 from pyrosetta.rosetta.core.pose.symmetry import sym_dof_jump_num
 from pyrosetta.rosetta.numeric import dihedral_radians
 from pyrosetta.rosetta.core.scoring import ScoreTypeManager
 from symmetryhandler.mathfunctions import vector_angle
 from symmetryhandler.reference_kinematics import set_jumpdof_str_str, get_jumpdof_str_str
-from cubicsym.kinematics import default_HF_dofs
 from cubicsym.cubicsetup import CubicSetup
 from cubicsym.dofspec import DofSpec
 import numpy as np
@@ -35,27 +35,32 @@ class CubicBoundary:
     default_params = {"step_type": "gauss", "param1": 0.5, "param2": 0.0, "min_pertubation": 0.01,
                "limit_movement": False, "max": 0, "min": 0}
 
-    def __init__(self, symdef, pose_at_initial_position, dof_spec: DofSpec, buffer=0.01, sd=1, well_depth=1e9):
+    def __init__(self, cubicsetup: CubicSetup, pose_at_initial_position, dof_spec: DofSpec, buffer=0.01, sd=1, well_depth=1e9):
         """
 
         :param buffer: Used when checking if the pose is inside the bounds or when perturbing the pose back into bounds if it is outisde.
             When checking for out of bounds the pose is allowed to be on the boundary +/- buffer. When pertubing the pose is
             put at the closest boundary border +/- buffer.
         """
-        self.symdef = symdef
-        self.cubicsetup = CubicSetup(symdef)
+        self.cubicsetup = cubicsetup
+        self.cubicsetup.update_dofs_from_pose(pose_at_initial_position)
         self.vrt_map = self.cubicsetup.get_map_vrt_to_pose_resi(pose_at_initial_position)
         self.resi_map = {v: k for k, v in self.vrt_map.items()}
         self.symmetry_multiplier = self.cubicsetup.cubic_energy_multiplier_from_pose(pose_at_initial_position)
         self.set_jump_names()
         self.buffer = buffer
         self.dof_spec = dof_spec
+        self.store_initial_positions(pose_at_initial_position)
         self.set_boundary(pose_at_initial_position)
         self.current_limits = {k:{kk:{"min": None, "max": None} for kk in v} for k, v in self.dof_spec.dof_spec.items()}
         assert sd != 0
         assert well_depth != 0
         self.sd = sd
         self.well_depth = well_depth
+
+    def store_initial_positions(self, pose_at_initial_position):
+        self.initial_positions_str_str = self.dof_spec.get_positions_as_dict_str_str(pose_at_initial_position)
+        self.initial_positions_int_int = self.dof_spec.get_positions_as_dict_int_int(pose_at_initial_position)
 
     def set_jump_names(self):
         jid = self.cubicsetup.get_jumpidentifier()
@@ -302,8 +307,7 @@ class CubicBoundary:
 
     def set_constraints(self, pose):
         """Sets cubic symmetrical constraints for the pose. sd is the standard deviation and a smaller number means a larger penalty."""
-        self.current_positions = self.dof_spec.get_positions_as_dict(pose)
-        jid = CubicSetup.get_jumpidentifier_from_pose(pose)
+        self.current_positions = self.dof_spec.get_positions_as_dict_str_str(pose)
         self.add_z_constraints(pose, self.create_bounded_func(*self.get_boundary(self.z, "z")))
         self.add_x_constraints(pose, self.create_bounded_func(*self.get_boundary(self.x, "x")))
         self.add_angle_z_constraints(pose, self.create_bounded_func(*self.get_boundary(self.angle_z, "angle_z", in_rad=True)))
@@ -336,6 +340,10 @@ class CubicBoundary:
     def convert_to_rad(self, degrees):
         return degrees * math.pi / 180
 
+    def get_all_boundaries(self):
+        lower, upper = self.boundaries[jumpname][dofname]["min"], self.boundaries[jumpname][dofname]["max"]
+
+
     def get_boundary(self, jumpname: str, dofname:str, in_rad=False, add_buffer=False):
         lower, upper = self.boundaries[jumpname][dofname]["min"], self.boundaries[jumpname][dofname]["max"]
         if add_buffer:
@@ -347,7 +355,7 @@ class CubicBoundary:
 
     def set_boundary(self, pose_at_initial_position):
         self.boundaries = {}
-        all_current_pos = self.dof_spec.get_positions_as_dict(pose_at_initial_position)
+        all_current_pos = self.dof_spec.get_positions_as_dict_str_str(pose_at_initial_position)
         for jump_name, jumpdof_params in self.dof_spec.dof_spec.items():
             self.boundaries[jump_name] = {}
             for dof_name, dof_params in jumpdof_params.items():
@@ -399,16 +407,20 @@ class CubicBoundary:
                             if current_val >= max_bound:
                                 set_jumpdof_str_str(pose, jump_name, dof_name, max_bound - self.buffer)
 
-    def construct_rigidbody_mover(self, pose, rb_name="") -> RigidBodyDofAdaptiveMover:
+    def construct_rigidbodydofadaptive_mover(self, pose, cubicboundary, rb_name="") -> RigidBodyDofAdaptiveMover:
         """Construct rigidbodymover."""
-        rb_mover = RigidBodyDofAdaptiveMover(rb_name)
-        self.current_positions = self.dof_spec.get_positions_as_dict(pose)
+        rb_mover = RigidBodyDofAdaptiveMover(rb_name, cubicboundary)
+        self.current_positions = self.dof_spec.get_positions_as_dict_str_str(pose)
         for jump_name, jumpdof_params in self.dof_spec.dof_spec.items():
             for dof_name, dof_params in jumpdof_params.items():
                 # print(*self.get_extra_options(pose, jump_name, dof_name, dof_params))
                 extra_options = self.get_extra_options(pose, jump_name, dof_name, dof_params)
                 # print(jump_name, dof_name, extra_options)
                 rb_mover.add_jump(pose, jump_name, self.hack_map[dof_name], *extra_options)
+        return rb_mover
+
+    def construct_rigidbodycombined_mover(self, cubicboundary):
+        rb_mover = RigidBodyCombinedMover(cubicboundary)
         return rb_mover
 
     def get_extra_options(self, pose, jump_name, dof_name, dof_params):

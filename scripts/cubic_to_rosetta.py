@@ -19,6 +19,8 @@ from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
 from symmetryhandler.symmetrysetup import SymmetrySetup
 import pandas as pd
 import sys
+from distutils.util import strtobool
+
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
@@ -123,7 +125,7 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
                         full_repr, full_repr_names, full_repr_outpath,
                         symmetry_visualization, symmetry_visualization_names, symmetry_visualization_outpath, quality_assurance_on,
                         idealize, report, report_outpath, report_names, ignore_chains, main_id, foldmap, output_generated_structure,
-                        output_generated_structure_path):
+                        output_generated_structure_path, use_full, model_together):
     """Makes a cubic symdef and Rosetta input file and optionally the full cubic structure, the Rosetta representation
     structure and a symmetry visualization script."""
     for structure, symdef_name, input_name, rosetta_repr_name, crystal_repr_name, full_repr_name, symvis_name, report_name in zip(structures, symdef_names, input_names,
@@ -147,7 +149,8 @@ def make_cubic_symmetry(structures, symmetry, overwrite, symdef_names, symdef_ou
                    "residues": None,
                    "size": None}
         try:
-            full = CubicSymmetricAssembly(mmcif_file=structure, mmcif_symmetry=symmetry, ignore_chains=ignore_chains)
+            full = CubicSymmetricAssembly(mmcif_file=structure, mmcif_symmetry=symmetry, ignore_chains=ignore_chains, use_full=use_full,
+                                          model_together=model_together)
             if output_generated_structure:
                 name = f"{output_generated_structure_path}/{Path(structure).stem}_generated.cif"
                 print("Dumps the generated structure to disk:", name)
@@ -257,6 +260,11 @@ https://github.com/Andre-lab/cubicsym
                                            "If 'I', 'O' or 'T' is used the script will iterate through each available assembly, check its symmetry,"
                                            "and return the first instance of the assembly with the corresponding symmetry. If a number is used instead the script will "
                                            "attempt to generate whatever cubic symmetrical structure it corresponds to (if possible).", type=str, required=True)
+    parser.add_argument('--use_full', help="By default the script asummes the structure contains 1 chain and symmetry operations"
+                                           " to create the full structure. If the input file is already the full structure"
+                                           " then apply this.", default=False, type=strtobool)
+    parser.add_argument('--model_together', help="Will apply rotations and translations to all chains listed in the '_pdbx_struct_assembly_gen.asym_id_list' line in the mmcif file. "
+                                                 "This is a way to create symmetrical assemblies for structures containing more chains than 60 for I, 24 for O and 12 for T.",  default=False, type=strtobool)
     parser.add_argument('--output_generated_structure', help="Output the full biological assembly only and the scripts ends."
                                                              "Useful if specifying subunit numbers through --hf1 or equivalent.", action="store_true")
     # foldmap options
@@ -278,14 +286,14 @@ https://github.com/Andre-lab/cubicsym
     # overwrite
     parser.add_argument('--overwrite', help="To overwrite the files (and if set, the report), or not", action="store_true")
     # on/off for output
-    parser.add_argument('--rosetta_repr', help="Output the structure that is represented with the symmetryfile.", default=False, type=bool)
+    parser.add_argument('--rosetta_repr', help="Output the structure that is represented with the symmetryfile.", default=False, type=strtobool)
     parser.add_argument('--crystal_repr', help="Output the crystal structure containing only the chains present in the symmetric pose."
-                                               "This can be used for RMSD calcuations.", default=False, type=bool)
-    parser.add_argument('--full_repr', help="Output the corresponding cubic structure.", default=False, type=bool)
-    parser.add_argument('--symmetry_visualization', help="ouputs a symmetry visualization script that can be used in pymol.",  default=False, type=bool)
+                                               "This can be used for RMSD calcuations.", default=False, type=strtobool)
+    parser.add_argument('--full_repr', help="Output the corresponding cubic structure.", default=False, type=strtobool)
+    parser.add_argument('--symmetry_visualization', help="ouputs a symmetry visualization script that can be used in pymol.",  default=False, type=strtobool)
     parser.add_argument('--report', help="Output a report file that reports symmetry information and any errors occured during the program. "
                                          "Notice that the program will not exit if an exception occurs. Check the report script for which "
-                                         "error actually occurred in that case.", default=False, type=bool)
+                                         "error actually occurred in that case.", default=False, type=strtobool)
     # output paths
     parser.add_argument('--symdef_outpath', help="Path to the directory of where to output the symdef files.", default=".", type=str)
     parser.add_argument('--input_outpath', help="Path to the directory of where to output the Rosetta input pdb files.", default=".", type=str)
@@ -308,8 +316,8 @@ https://github.com/Andre-lab/cubicsym
     parser.add_argument('--quality_assurance', help="Will run a quality assurance check to see that the outputs of the script is in "
                                                     "accordance with the actual cubic structure present in the RCSB along with other things."
                                                     " To run this, internet access is needed and the stem of the filename (like 1stm in 1stm.cif)"
-                                                    " needs to present in the RCSB.", default=False, type=bool)
-    parser.add_argument('--idealize', help="To idealize the symmetry", default=True, type=bool)
+                                                    " needs to present in the RCSB.", default=False, type=strtobool)
+    parser.add_argument('--idealize', help="To idealize the symmetry", default=True, type=strtobool)
     # parse the arguments.
     args = parser.parse_args()
 
@@ -355,7 +363,7 @@ https://github.com/Andre-lab/cubicsym
                         args.full_repr, args.full_repr_names, args.full_repr_outpath,
                         args.symmetry_visualization, args.symmetry_visualization_names, args.symmetry_visualization_outpath, args.quality_assurance,
                         args.idealize, args.report, args.report_outpath, args.report_names, args.ignore_chains, args.main_id, foldmap, args.output_generated_structure,
-                        args.output_generated_structure_outpath)
+                        args.output_generated_structure_outpath, args.use_full, args.model_together)
 
 if __name__ == '__main__':
     main()

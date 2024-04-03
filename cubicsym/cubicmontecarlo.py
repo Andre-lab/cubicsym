@@ -20,13 +20,13 @@ class CubicMonteCarlo:
     def __init__(self, scorefunction, dofspec: DofSpec, pose=None, reset_on_first_apply=False, annealing=False, t_delta=0.001, t_start=0.8):
         self.sfxn = scorefunction
         self.reset_on_first_apply = reset_on_first_apply
+        self.dofspec = dofspec
         if pose is not None:
             self.reset(pose)
         self.t_delta = t_delta # how much to decrement the temperature with
         self.t_start = t_start # starting temperature. Same as for SymDockAdaptiveMover
         self.t = self.t_start
         self.annealing = annealing
-        self.dofspec = dofspec
 
     def reset(self, pose):
         """Sets the best score and best pose from passed pose."""

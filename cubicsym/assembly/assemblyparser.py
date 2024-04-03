@@ -62,14 +62,14 @@ class AssemblyParser:
             return self.create_symmetric_pose_from_asymmetric_output(file)
 
     # TODO: can be independent on from_symmetric_output_and_symmetry_file and therefor faster as well.
-    def capsid_from_asymmetric_output(self, file:str):
+    def capsid_from_asymmetric_output(self, input_file:str):
         """Creates a capsid from an asymmetric output from the shapedocking protocol."""
-        pose, symmetry_file = self.create_symmetric_pose_from_asymmetric_output(file, return_symmetry_file=True)
+        pose, symmetry_file = self.create_symmetric_pose_from_asymmetric_output(input_file, return_symmetry_file=True)
         buffer = ostringstream()
         pose.dump_pdb(buffer)
-        return self.from_symmetric_output_pdb_and_symmetry_file(StringIO(buffer.str()), StringIO(symmetry_file), assembly_name=file)
+        return self.from_symmetric_output_pdb_and_symmetry_file(StringIO(buffer.str()), StringIO(symmetry_file))
 
-    def from_symmetric_output_pdb_and_symmetry_file(cls, file, symmetry_file, assembly_name=None):
+    def from_symmetric_output_pdb_and_symmetry_file(cls, input_file, symmetry_file):
         """
         The algorithm is as follows:
          1. Generate the 2 fold from the chain A
@@ -79,7 +79,7 @@ class AssemblyParser:
          4. rotate the half capsid 180 degrees at specific point along the middle.
         # todo: other than icosahedral structures in the future
         # todo: Have to rewrite for multichain systems.
-        :param file:
+        :param input_file:
         :param symmetry_file:
         :return:
         """
@@ -91,13 +91,13 @@ class AssemblyParser:
 
         # read rosetta pdb file from file
         # if isinstance(file, StringIO)
-        fsuffix = Path(assembly_name).suffix
+        fsuffix = Path(input_file).suffix
         assert fsuffix in (".cif", ".pdb"), f"File has to have either extension '.cif' of '.pdb' not {fsuffix}"
         if fsuffix == ".cif":
             p = MMCIFParser()
         else:
             p = PDBParser(PERMISSIVE=1)
-        structure = p.get_structure(file, file)
+        structure = p.get_structure(input_file, input_file)
         global_z = setup.get_vrt("VRTglobal")._vrt_z
 
         # Variable that will contain all chains of the assembly

@@ -6,6 +6,9 @@ cubic_from_rosetta.py script
 @Date: 4/6/22
 """
 from cubicsym.assembly.assemblyparser import AssemblyParser
+from cubicsym.assembly.cubicassembly import CubicSymmetricAssembly
+from cubicsym.cubicsetup import CubicSetup
+from pyrosetta import pose_from_file, init
 import pathlib
 import textwrap
 import numpy as np
@@ -79,7 +82,6 @@ def main():
     symmetry_files = comm.scatter(symmetry_files, root=0)
 
     # the actual representation generation
-    parser = AssemblyParser()
     for struct, out_dir, out_name, symmdef in zip(structures, out_dirs, out_names, symmetry_files):
         name = pathlib.Path(out_dir).joinpath(out_name)
         if name.exists():
@@ -89,9 +91,18 @@ def main():
         print("Generates: ", name, flush=True)
         if args.out_repr == "ico":
             if symmdef:
-                assembly = parser.from_symmetric_output_pdb_and_symmetry_file(struct, symmdef)
+                # check how many chains it has
+                init("-initialize_rigid_body_dofs 1")
+                pose = pose_from_file(struct)
+                if pose.num_chains() < 9:
+                    cs = CubicSetup(symmdef)
+                    cs.make_symmetric_pose(pose)
+                    assembly = CubicSymmetricAssembly.from_pose_input(pose, cs)
+                else:
+                    assembly = AssemblyParser().from_symmetric_output_pdb_and_symmetry_file(struct, symmdef)
+
             else:
-                assembly = parser.capsid_from_asymmetric_output(struct)
+                assembly = AssemblyParser().capsid_from_asymmetric_output(struct)
             assembly.output(str(name))
         else:
             pose = parser.rosetta_representation_from_asymmetric_output(struct, symmdef)

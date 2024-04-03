@@ -39,7 +39,7 @@ class SymDefSwapper:
             self.generate_normalized_symmetries(cs)
         else:
             assert cs.is_hf_based(), "For unnormalized symmetry only HF based symmetry is allowed."
-            self.generate_symmetry_setups_from_HF(cs)
+            self.generate_symmetry_setups_from_HF(cs, pose_X)
         self.foldHF_setup.apply_dofs()
         self.fold3F_setup.apply_dofs()
         self.fold2F_setup.apply_dofs()
@@ -57,12 +57,15 @@ class SymDefSwapper:
         self.fold2F_setup = CubicSetup()
         self.fold2F_setup.load_norm_symdef(self.symmetry_type, "2F")
 
-    def generate_symmetry_setups_from_HF(self, cs):
+    def generate_symmetry_setups_from_HF(self, cs, pose):
         """Generates HF, 3F and 2F CubicSetups."""
         self.foldHF_setup = cs
         if self.symmetry_type == "I":
             self.fold3F_setup = self.foldHF_setup.create_I_3fold_based_symmetry()
             self.fold2F_setup = self.foldHF_setup.create_I_2fold_based_symmetry()
+            if self.foldHF_setup.has_extra_chains(pose):
+                self.fold3F_setup = self.fold3F_setup.add_extra_chains()
+                self.fold2F_setup = self.fold2F_setup.add_extra_chains()
         elif self.symmetry_type == "O":
             self.fold3F_setup = self.foldHF_setup.create_O_3fold_based_symmetry()
             self.fold2F_setup = self.foldHF_setup.create_O_2fold_based_symmetry()
