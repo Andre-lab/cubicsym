@@ -31,6 +31,7 @@ from Bio.PDB.Structure import Structure
 from Bio.PDB.vectors import Vector
 from cubicsym.mathfunctions import distance, vector
 from Bio.PDB import Chain
+import subprocess
 
 class Assembly(Structure):
     """A class build on top of the Structure class in BioPython"""
@@ -681,8 +682,13 @@ class Assembly(Structure):
         # 1. get the sequence for all chains and create a fasta file:
         in_file = f"/tmp/{''.join([str(random.randint(0,9)) for i in range(10)])}.fasta"
         self._write_fasta(in_file)
-        mafft_cline = MafftCommandline(input=in_file, clustalout=True)  # , thread=1)
-        stdout, stderr = mafft_cline()
+        command = ["mafft", "--clustalout", in_file]
+        # this command has been depreciated
+        # mafft_cline = MafftCommandline(input=in_file, clustalout=True)  # , thread=1)
+        # stdout, stderr = mafft_cline()
+        # So i am running subprocess instead
+        result = subprocess.run(command, capture_output=True, text=True)
+        stdout, stderr = result.stdout, result.stderr
         new = stdout.split("\n")
         new.pop(0)  # remove header
         new = [i for i in new if i != ""]  # remove all empty elements
