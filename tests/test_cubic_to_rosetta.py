@@ -450,3 +450,48 @@ def test_cubic_to_rosetta_I_multiple(mock_args):
     # pydevd_pycharm.settrace(IP, port=port_mapping[rank], stdoutToServer=True, stderrToServer=True)
     from scripts.cubic_to_rosetta import main
     main()
+
+@mock.patch('argparse.ArgumentParser.parse_args',
+            return_value=argparse.Namespace(
+                structures=["/home/mads/projects/shapedesign/tests/inputs/4btg.cif"],
+                symmetry="I",
+                overwrite=True,
+                rosetta_repr=True,
+                crystal_repr=True,
+                full_repr=True,
+                symmetry_visualization=None,
+                report=False,
+                use_full=False,
+                symdef_outpath="outputs",
+                input_outpath="outputs",
+                rosetta_repr_outpath="outputs",
+                crystal_repr_outpath="outputs",
+                full_repr_outpath="outputs",
+                symmetry_visualization_outpath="outputs",
+                report_outpath="outputs",
+                symdef_names=['<prefix>.symm'],
+                input_names=['<prefix>.cif'],
+                rosetta_repr_names=['<prefix>_rosetta.pdb'],
+                crystal_repr_names=['<prefix>_crystal.pdb'],
+                full_repr_names=['<prefix>_full.cif'],
+                symmetry_visualization_names=['<prefix>_symmetry_visualization.py'],
+                quality_assurance=True,
+                idealize=True,
+                report_names=['<prefix>.csv'],
+                ignore_chains=None,
+                main_id="1",
+                model_together=True,
+                hf1=None,
+                hf2=None,
+                hf3=None,
+                f3=None,
+                f21=None,
+                f22=None,
+                # output_generated_structure=True,
+                output_generated_structure=False,
+                output_generated_structure_outpath=".",
+            ))
+def test_cubic_to_rosetta_T2(mock_args):
+    from scripts.cubic_to_rosetta import main
+    main()
+

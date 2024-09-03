@@ -34,7 +34,7 @@ class JumpOutMover:
         raise NotImplementedError("this has to be tested and I dont think it will work with pose_total_eneriges")
         initial_score = pose.energies().total_energy()
         self.first_mover.apply(pose)
-        self.scorefxn(pose)
+        self.sfxn(pose)
         move_score = pose.energies().total_energy()
         if move_score - initial_score < self.tolerance:
             self.second_mover.apply(pose)

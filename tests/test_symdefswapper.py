@@ -7,12 +7,28 @@ Tests for the SymDefSwapper class
 """
 import math
 
-
-# def test_dofs_are_the_same():
+def test_all_fully_procteced():
+    from simpletestlib.setup import setup_test
+    from cubicsym.actors.symdefswapper import SymDefSwapper
+    from cubicsym.cubicsetup import CubicSetup
+    from cubicsym.kinematics import randomize_all_dofs
+    sym = "I"
+    pdbids = {'1STM': True, '1NQW': False,  '1B5S': True, '6S44': False,}
+    for pdb in pdbids.keys():
+        print(f"Doing {pdb}")
+        pose_mono, pmm, cmd, symdef = setup_test(name=sym, file=pdb, return_symmetry_file=True, mute=True, symmetrize=False)
+        pmm.keep_history(True)
+        cs = CubicSetup(symdef)
+        cs_hf = cs.add_extra_chains()
+        poseHF = pose_mono.clone()
+        cs_hf.make_symmetric_pose(poseHF)
+        symdef = cs_hf.make_symmetry_file_on_tmp_disk()
+        sds = SymDefSwapper(poseHF, symdef, debug_mode=True)
+        change_alot_and_transfer(poseHF, sds, pmm)
 
 
 def test_all_normalized():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from cubicsym.cubicsetup import CubicSetup
     from cubicsym.kinematics import randomize_all_dofs
@@ -48,7 +64,7 @@ def test_all_normalized():
                 change_alot_and_transfer(pose, sds, pmm)
 
 def test_all_symm():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.actors.symdefswapper import SymDefSwapper
     sym_files = {"I": ["1STM", "6S44"],
                  "O": ["1AEW", "1P3Y"],
@@ -62,7 +78,7 @@ def test_all_symm():
             change_alot_and_transfer(poseHF, sds, pmm)
 
 def test_T_sym():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.actors.symdefswapper import SymDefSwapper
     for pdb in ("1MOG", "1H0S"):
         poseHF, pmm, cmd, symdef = setup_test(name="T", file=pdb, return_symmetry_file=True, mute=True)
@@ -71,7 +87,7 @@ def test_T_sym():
         change_alot_and_transfer(poseHF, sds, pmm)
 
 def test_O_sym():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.actors.symdefswapper import SymDefSwapper
     for pdb in ("1AEW", "1P3Y"):
         poseHF, pmm, cmd, symdef = setup_test(name="O", file=pdb, return_symmetry_file=True, mute=True)
@@ -81,7 +97,7 @@ def test_O_sym():
         change_alot_and_transfer(poseHF, sds, pmm)
 
 def test_I_sym():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.actors.symdefswapper import SymDefSwapper
     for pdb in ("1STM", "6S44"):
         poseHF, pmm, cmd, symdef = setup_test(name="I", file=pdb, return_symmetry_file=True, mute=True)
@@ -90,11 +106,11 @@ def test_I_sym():
         poseHF.pdb_info().name("HF")
         change_alot_and_transfer(poseHF, sds, pmm)
 
-def change_alot_and_transfer(pose_org_X, sds, pmm, behavior="randomize", atol=2):
+def change_alot_and_transfer(pose_org_X, sds, pmm, behavior="randomize", atol=2, show_correct_structure=False):
     from cubicsym.kinematics import randomize_all_dofs, randomize_all_dofs_positive_trans
     from cubicsym.utilities import get_chain_map
     from cubicsym.cubicsetup import CubicSetup
-    from shapedesign.src.utilities.pose import pose_cas_are_identical
+    from cubicsym.utilities import pose_cas_are_identical
     from symmetryhandler.reference_kinematics import get_dofs
     def check_overlap(poseHF, pose3, pose2):
         sds.foldHF_setup.vrts_overlap_with_pose(poseHF)
@@ -144,13 +160,14 @@ def change_alot_and_transfer(pose_org_X, sds, pmm, behavior="randomize", atol=2)
             pmm.apply(pose2)
             raise AssertionError
         else:
-            # pmm.apply(poseHF)
-            # pmm.apply(pose3)
-            # pmm.apply(pose2)
-            ...
+            if show_correct_structure:
+                pmm.apply(poseHF)
+                pmm.apply(pose3)
+                pmm.apply(pose2)
+                ...
 
 def test_different_backbones():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.actors.symdefswapper import SymDefSwapper
     import random
     from pathlib import Path

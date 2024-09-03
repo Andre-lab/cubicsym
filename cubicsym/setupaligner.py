@@ -10,7 +10,7 @@ from pyrosetta.rosetta.core.scoring import CA_rmsd
 from cubicsym.cubicsetup import CubicSetup
 from cubicsym.cubicmontecarlo import CubicMonteCarlo
 from cubicsym.dofspec import DofSpec
-from pyrosetta.rosetta.protocols.rigid import RigidBodyDofAdaptiveMover
+# from pyrosetta.rosetta.protocols.rigid import RigidBodyDofAdaptiveMover
 from pyrosetta import Pose
 from copy import deepcopy
 import numpy as np

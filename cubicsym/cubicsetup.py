@@ -38,48 +38,6 @@ class CubicSetup(SymmetrySetup):
         self.chain_map_str2int = {k: v for k, v in zip(tuple("ABCDEFGHI"), tuple(range(1, 10)))}
         self.extract_headers()
 
-
-
-    def read_from_pose(self, pose):
-        raise NotImplementedError
-        si = pose.conformation().Symmetry_Info()
-        self.symmetry_name = f"Constructed_from_pose_{pose.pdb_info().name()}"
-        # The following is for COM. You can check that which residue is at the anchor VRT and if it is the COM residue we
-        # say that it is that residue else we pick another residue.
-        self.anchor = residue_center_of_mass(pose.conformation(), 1, pose.chain_end(1))
-        self.recenter = None  # cannot get
-        self.energies = []
-        # I am not sure i can the rest from pose.conformation().Symmetry_Info() alone
-        # these are the jumpgroups
-        # for i in range(500):
-        #     jump_clones = si.jump_clones(i)
-        #     if len(jump_clones) > 0:
-        #         print(jump_clones)
-        #         print(jump_num_sym_dof(pose, i))
-
-        # there should also be to go through pose.fold_tree()
-        # todo tmr: Finish this and test that it recapitulates the symmetry with randomized dofs
-        self._jumps = {}
-        self._jumpgroups = {}
-        self._dofs = {}
-        self._vrts = []
-        self._init_vrts = None
-        self.reference_symmetric = None
-        self.actual_anchor_residue = None
-        self.headers = {}
-                # self.headers[k] = v
-                # self.symmetry_name = " ".join(line[1:])
-                # self.energies = " ".join(line[2:])
-                # self.anchor = " ".join(line[1:])
-                # self.recenter = True
-                # self._vrts
-                # self.add_jump(line[1], line[2], line[3])
-                # self.add_dof(line[1], axes, degree, value)
-                # self.add_jumpgroup(line[1], *line[2:])
-
-        pass
-        ...
-
     def sds_overlaps_with_anchor(self, pose, update_and_apply_dofs=True, atol=1e-1):
         if update_and_apply_dofs:
             self.update_dofs_from_pose(pose, apply_dofs=True)
@@ -101,12 +59,6 @@ class CubicSetup(SymmetrySetup):
 
     def load_norm_symdef(self, symmetry, fold):
         self.read_from_file(self.get_norm_symdef_path(symmetry, fold))
-
-    def extract_headers(self):
-        """Extracts headers from the symmetry file"""
-        righthanded = self.headers.get("righthanded", None)
-        self.righthanded = yaml.safe_load(righthanded) if righthanded is not None else None
-        self.headers.get("normalized", None)
 
     def is_normalized(self):
         """Checks if the symmetry setup is normalized"""
@@ -393,13 +345,13 @@ class CubicSetup(SymmetrySetup):
             return "2F"
 
     def is_hf_based(self):
-        return "JUMPHFfold" in self._jumps.keys()
+        return "JUMPHFfold" in self.jumps.keys()
 
     def is_3f_based(self):
-        return "JUMP31fold" in self._jumps.keys()
+        return "JUMP31fold" in self.jumps.keys()
 
     def is_2f_based(self):
-        return "JUMP21fold" in self._jumps.keys()
+        return "JUMP21fold" in self.jumps.keys()
 
     def get_HF_chains(self, pose):
         """Get the HF chains of the pose only."""
@@ -801,12 +753,12 @@ class CubicSetup(SymmetrySetup):
             connect_virtual JUMPHFfold151_z VRTHFfold151_z_rref VRTHFfold151_z
             connect_virtual JUMPHFfold151_sds VRTHFfold151_z VRTHFfold151_sds
             connect_virtual JUMPHFfold151_subunit VRTHFfold151_sds SUBUNIT 
-            set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) 
-            set_dof JUMPHFfold1_z angle_z({symmetry_setup._dofs['JUMPHFfold1_z'][0][2]})
-            set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
-            set_dof JUMPHFfold111_x angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]})
-            set_dof JUMPHFfold111_y angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
-            set_dof JUMPHFfold111_z angle_z({symmetry_setup._dofs['JUMPHFfold111_z'][0][2]})
+            set_dof JUMPHFfold1 z({symmetry_setup.dofs['JUMPHFfold1'][0][2]}) 
+            set_dof JUMPHFfold1_z angle_z({symmetry_setup.dofs['JUMPHFfold1_z'][0][2]})
+            set_dof JUMPHFfold111 x({symmetry_setup.dofs['JUMPHFfold111'][0][2]})
+            set_dof JUMPHFfold111_x angle_x({symmetry_setup.dofs['JUMPHFfold111_x'][0][2]})
+            set_dof JUMPHFfold111_y angle_y({symmetry_setup.dofs['JUMPHFfold111_y'][0][2]})
+            set_dof JUMPHFfold111_z angle_z({symmetry_setup.dofs['JUMPHFfold111_z'][0][2]})
             set_jump_group JUMPGROUP1 JUMPHFfold111 JUMPHFfold121 JUMPHFfold131 JUMPHFfold141 JUMPHFfold151 
             set_jump_group JUMPGROUP2 JUMPHFfold111_x JUMPHFfold121_x JUMPHFfold131_x JUMPHFfold141_x JUMPHFfold151_x 
             set_jump_group JUMPGROUP3 JUMPHFfold111_y JUMPHFfold121_y JUMPHFfold131_y JUMPHFfold141_y JUMPHFfold151_y 
@@ -918,12 +870,12 @@ class CubicSetup(SymmetrySetup):
             connect_virtual JUMP2fold121_z VRT2fold121_z_rref VRT2fold121_z
             connect_virtual JUMP2fold121_sds VRT2fold121_z VRT2fold121_sds
             connect_virtual JUMP2fold121_subunit VRT2fold121_sds SUBUNIT
-            set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) 
-            set_dof JUMPHFfold1_z angle_z({symmetry_setup._dofs['JUMPHFfold1_z'][0][2]})
-            set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
-            set_dof JUMPHFfold111_x angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]})
-            set_dof JUMPHFfold111_y angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
-            set_dof JUMPHFfold111_z angle_z({symmetry_setup._dofs['JUMPHFfold111_z'][0][2]})
+            set_dof JUMPHFfold1 z({symmetry_setup.dofs['JUMPHFfold1'][0][2]}) 
+            set_dof JUMPHFfold1_z angle_z({symmetry_setup.dofs['JUMPHFfold1_z'][0][2]})
+            set_dof JUMPHFfold111 x({symmetry_setup.dofs['JUMPHFfold111'][0][2]})
+            set_dof JUMPHFfold111_x angle_x({symmetry_setup.dofs['JUMPHFfold111_x'][0][2]})
+            set_dof JUMPHFfold111_y angle_y({symmetry_setup.dofs['JUMPHFfold111_y'][0][2]})
+            set_dof JUMPHFfold111_z angle_z({symmetry_setup.dofs['JUMPHFfold111_z'][0][2]})
             set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP3fold1 JUMP2fold1
             set_jump_group JUMPGROUP2 JUMPHFfold1_z JUMP3fold1_z JUMP2fold1_z
             set_jump_group JUMPGROUP3 JUMPHFfold111 JUMP3fold111 JUMP2fold121
@@ -1003,12 +955,12 @@ class CubicSetup(SymmetrySetup):
         connect_virtual JUMP2fold111_z VRT2fold111_z_rref VRT2fold111_z
         connect_virtual JUMP2fold111_sds VRT2fold111_z VRT2fold111_sds
         connect_virtual JUMP2fold111_subunit VRT2fold111_sds SUBUNIT
-        set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) 
-        set_dof JUMPHFfold1_z angle_z({symmetry_setup._dofs['JUMPHFfold1_z'][0][2]})
-        set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
-        set_dof JUMPHFfold111_x angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]})
-        set_dof JUMPHFfold111_y angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
-        set_dof JUMPHFfold111_z angle_z({symmetry_setup._dofs['JUMPHFfold111_z'][0][2]})
+        set_dof JUMPHFfold1 z({symmetry_setup.dofs['JUMPHFfold1'][0][2]}) 
+        set_dof JUMPHFfold1_z angle_z({symmetry_setup.dofs['JUMPHFfold1_z'][0][2]})
+        set_dof JUMPHFfold111 x({symmetry_setup.dofs['JUMPHFfold111'][0][2]})
+        set_dof JUMPHFfold111_x angle_x({symmetry_setup.dofs['JUMPHFfold111_x'][0][2]})
+        set_dof JUMPHFfold111_y angle_y({symmetry_setup.dofs['JUMPHFfold111_y'][0][2]})
+        set_dof JUMPHFfold111_z angle_z({symmetry_setup.dofs['JUMPHFfold111_z'][0][2]})
         set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP2fold1
         set_jump_group JUMPGROUP2 JUMPHFfold1_z JUMP2fold1_z
         set_jump_group JUMPGROUP3 JUMPHFfold111 JUMP2fold111
@@ -1087,12 +1039,12 @@ class CubicSetup(SymmetrySetup):
         connect_virtual JUMP3fold121_z VRT3fold121_z_rref VRT3fold121_z
         connect_virtual JUMP3fold121_sds VRT3fold121_z VRT3fold121_sds
         connect_virtual JUMP3fold121_subunit VRT3fold121_sds SUBUNIT
-        set_dof JUMPHFfold1 z({symmetry_setup._dofs['JUMPHFfold1'][0][2]}) 
-        set_dof JUMPHFfold1_z angle_z({symmetry_setup._dofs['JUMPHFfold1_z'][0][2]})
-        set_dof JUMPHFfold111 x({symmetry_setup._dofs['JUMPHFfold111'][0][2]})
-        set_dof JUMPHFfold111_x angle_x({symmetry_setup._dofs['JUMPHFfold111_x'][0][2]})
-        set_dof JUMPHFfold111_y angle_y({symmetry_setup._dofs['JUMPHFfold111_y'][0][2]})
-        set_dof JUMPHFfold111_z angle_z({symmetry_setup._dofs['JUMPHFfold111_z'][0][2]})
+        set_dof JUMPHFfold1 z({symmetry_setup.dofs['JUMPHFfold1'][0][2]}) 
+        set_dof JUMPHFfold1_z angle_z({symmetry_setup.dofs['JUMPHFfold1_z'][0][2]})
+        set_dof JUMPHFfold111 x({symmetry_setup.dofs['JUMPHFfold111'][0][2]})
+        set_dof JUMPHFfold111_x angle_x({symmetry_setup.dofs['JUMPHFfold111_x'][0][2]})
+        set_dof JUMPHFfold111_y angle_y({symmetry_setup.dofs['JUMPHFfold111_y'][0][2]})
+        set_dof JUMPHFfold111_z angle_z({symmetry_setup.dofs['JUMPHFfold111_z'][0][2]})
         set_jump_group JUMPGROUP1 JUMPHFfold1 JUMP3fold1
         set_jump_group JUMPGROUP2 JUMPHFfold1_z JUMP3fold1_z
         set_jump_group JUMPGROUP3 JUMPHFfold111 JUMP3fold121
@@ -1202,7 +1154,7 @@ class CubicSetup(SymmetrySetup):
     def straightinator(self, cs):
         """Makes the last VRT's that control the COM rotation are set identical to their parent VRT '=straighten'. This is
         important when we flip the subunits during EvoDOCK"""
-        for vrts in [cs.get_downstream_connections(j)[:-2] for j in cs._jumpgroups["JUMPGROUP3"]]:
+        for vrts in [cs.get_downstream_connections(j)[:-2] for j in cs.jumpgroups["JUMPGROUP3"]]:
             for n, vrt in enumerate(vrts):
                 if n == 0:
                     vrt_to_copy = copy.deepcopy(cs.get_unapplied_vrt(vrt))
@@ -3018,14 +2970,14 @@ class CubicSetup(SymmetrySetup):
             ss.add_jump(f"JUMP{id_}fold111_sds", f"VRT{id_}fold111_z", f"VRT{id_}fold111_sds")
             ss.add_jump(f"JUMP{id_}fold111_subunit", f"VRT{id_}fold111_sds", f"SUBUNIT")
 
-            ss._jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
-            ss._jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
-            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
-            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
-            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
-            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
-            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
-            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
+            ss.jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
+            ss.jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
+            ss.jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
+            ss.jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
+            ss.jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
+            ss.jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
+            ss.jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
+            ss.jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
 
         for id_ in ("25", "23"):
 
@@ -3058,12 +3010,12 @@ class CubicSetup(SymmetrySetup):
             ss.add_jump(f"JUMP{id_}fold121_subunit", f"VRT{id_}fold121_sds", f"SUBUNIT")
 
             # jumpgroups
-            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold121")
-            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold121_x")
-            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold121_y")
-            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold121_z")
-            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold121_sds")
-            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold121_subunit")
+            ss.jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold121")
+            ss.jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold121_x")
+            ss.jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold121_y")
+            ss.jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold121_z")
+            ss.jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold121_sds")
+            ss.jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold121_subunit")
 
 
         for f, final_angle, id_ in zip(("22", "25"), (mul*72*2, -1 * mul *72), ("T", "P")):
@@ -3114,14 +3066,14 @@ class CubicSetup(SymmetrySetup):
             ss.add_jump(f"JUMP{id_}fold111_sds", f"VRT{id_}fold111_z", f"VRT{id_}fold111_sds")
             ss.add_jump(f"JUMP{id_}fold111_subunit", f"VRT{id_}fold111_sds", f"SUBUNIT")
 
-            ss._jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
-            ss._jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
-            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
-            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
-            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
-            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
-            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
-            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
+            ss.jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
+            ss.jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
+            ss.jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
+            ss.jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
+            ss.jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
+            ss.jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
+            ss.jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
+            ss.jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
 
         ss._set_init_vrts()
         return ss
@@ -3201,14 +3153,14 @@ class CubicSetup(SymmetrySetup):
             ss.add_jump(f"JUMP{id_}fold111_sds", f"VRT{id_}fold111_z", f"VRT{id_}fold111_sds")
             ss.add_jump(f"JUMP{id_}fold111_subunit", f"VRT{id_}fold111_sds", f"SUBUNIT")
 
-            ss._jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
-            ss._jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
-            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
-            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
-            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
-            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
-            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
-            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
+            ss.jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
+            ss.jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
+            ss.jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
+            ss.jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
+            ss.jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
+            ss.jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
+            ss.jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
+            ss.jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
 
         # Now the rest we can add to existing 3-fodls
         for f, id_, angle in zip(("33", "32", "34", "35"), ("L", "T", "K", "H"), (-120, 120, 120, -120)):
@@ -3253,14 +3205,14 @@ class CubicSetup(SymmetrySetup):
             ss.add_jump(f"JUMP{id_}fold111_sds", f"VRT{id_}fold111_z", f"VRT{id_}fold111_sds")
             ss.add_jump(f"JUMP{id_}fold111_subunit", f"VRT{id_}fold111_sds", f"SUBUNIT")
 
-            ss._jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
-            ss._jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
-            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
-            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
-            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
-            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
-            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
-            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
+            ss.jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
+            ss.jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
+            ss.jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
+            ss.jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
+            ss.jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
+            ss.jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
+            ss.jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
+            ss.jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
 
 
         ss._set_init_vrts()
@@ -3350,20 +3302,20 @@ class CubicSetup(SymmetrySetup):
             ss.add_jump(f"JUMP{id_}fold121_subunit", f"VRT{id_}fold121_sds", f"SUBUNIT")
 
             # jumpgroups
-            ss._jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
-            ss._jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
-            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
-            ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold121")
-            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
-            ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold121_x")
-            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
-            ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold121_y")
-            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
-            ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold121_z")
-            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
-            ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold121_sds")
-            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
-            ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold121_subunit")
+            ss.jumpgroups["JUMPGROUP1"].append(f"JUMP{id_}fold1")
+            ss.jumpgroups["JUMPGROUP2"].append(f"JUMP{id_}fold1_z")
+            ss.jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold111")
+            ss.jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold121")
+            ss.jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold111_x")
+            ss.jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold121_x")
+            ss.jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold111_y")
+            ss.jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold121_y")
+            ss.jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold111_z")
+            ss.jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold121_z")
+            ss.jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold111_sds")
+            ss.jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold121_sds")
+            ss.jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold111_subunit")
+            ss.jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold121_subunit")
 
             if angle2 is not None:
 
@@ -3393,12 +3345,12 @@ class CubicSetup(SymmetrySetup):
                 ss.add_jump(f"JUMP{id_}fold131_subunit", f"VRT{id_}fold131_sds", f"SUBUNIT")
 
                 # jumpgroups
-                ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold131")
-                ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold131_x")
-                ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold131_y")
-                ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold131_z")
-                ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold131_sds")
-                ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold131_subunit")
+                ss.jumpgroups["JUMPGROUP3"].append(f"JUMP{id_}fold131")
+                ss.jumpgroups["JUMPGROUP4"].append(f"JUMP{id_}fold131_x")
+                ss.jumpgroups["JUMPGROUP5"].append(f"JUMP{id_}fold131_y")
+                ss.jumpgroups["JUMPGROUP6"].append(f"JUMP{id_}fold131_z")
+                ss.jumpgroups["JUMPGROUP7"].append(f"JUMP{id_}fold131_sds")
+                ss.jumpgroups["JUMPGROUP8"].append(f"JUMP{id_}fold131_subunit")
 
         # i also want to add a new
         # in the 2_fold
@@ -3430,12 +3382,12 @@ class CubicSetup(SymmetrySetup):
         ss.add_jump(f"JUMP{f}fold131_subunit", f"VRT{f}fold131_sds", f"SUBUNIT")
 
         # jumpgroups
-        ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{f}fold131")
-        ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{f}fold131_x")
-        ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{f}fold131_y")
-        ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{f}fold131_z")
-        ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{f}fold131_sds")
-        ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{f}fold131_subunit")
+        ss.jumpgroups["JUMPGROUP3"].append(f"JUMP{f}fold131")
+        ss.jumpgroups["JUMPGROUP4"].append(f"JUMP{f}fold131_x")
+        ss.jumpgroups["JUMPGROUP5"].append(f"JUMP{f}fold131_y")
+        ss.jumpgroups["JUMPGROUP6"].append(f"JUMP{f}fold131_z")
+        ss.jumpgroups["JUMPGROUP7"].append(f"JUMP{f}fold131_sds")
+        ss.jumpgroups["JUMPGROUP8"].append(f"JUMP{f}fold131_subunit")
 
         # add one more more in the
         f = "2"
@@ -3464,12 +3416,12 @@ class CubicSetup(SymmetrySetup):
         ss.add_jump(f"JUMP{f}fold131_subunit", f"VRT{f}fold131_sds", f"SUBUNIT")
 
         # jumpgroups
-        ss._jumpgroups["JUMPGROUP3"].append(f"JUMP{f}fold131")
-        ss._jumpgroups["JUMPGROUP4"].append(f"JUMP{f}fold131_x")
-        ss._jumpgroups["JUMPGROUP5"].append(f"JUMP{f}fold131_y")
-        ss._jumpgroups["JUMPGROUP6"].append(f"JUMP{f}fold131_z")
-        ss._jumpgroups["JUMPGROUP7"].append(f"JUMP{f}fold131_sds")
-        ss._jumpgroups["JUMPGROUP8"].append(f"JUMP{f}fold131_subunit")
+        ss.jumpgroups["JUMPGROUP3"].append(f"JUMP{f}fold131")
+        ss.jumpgroups["JUMPGROUP4"].append(f"JUMP{f}fold131_x")
+        ss.jumpgroups["JUMPGROUP5"].append(f"JUMP{f}fold131_y")
+        ss.jumpgroups["JUMPGROUP6"].append(f"JUMP{f}fold131_z")
+        ss.jumpgroups["JUMPGROUP7"].append(f"JUMP{f}fold131_sds")
+        ss.jumpgroups["JUMPGROUP8"].append(f"JUMP{f}fold131_subunit")
 
         ss._set_init_vrts()
         return ss

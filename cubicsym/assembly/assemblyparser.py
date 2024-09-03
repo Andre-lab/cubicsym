@@ -29,6 +29,7 @@ from pyrosetta.rosetta.core.conformation.symmetry import SymmData
 from pyrosetta.rosetta.std import ostringstream
 from pyrosetta import init
 from pathlib import Path
+import tempfile
 
 class AssemblyParser:
     """Parses different formats to an assembly."""
@@ -64,10 +65,15 @@ class AssemblyParser:
     # TODO: can be independent on from_symmetric_output_and_symmetry_file and therefor faster as well.
     def capsid_from_asymmetric_output(self, input_file:str):
         """Creates a capsid from an asymmetric output from the shapedocking protocol."""
-        pose, symmetry_file = self.create_symmetric_pose_from_asymmetric_output(input_file, return_symmetry_file=True)
-        buffer = ostringstream()
-        pose.dump_pdb(buffer)
-        return self.from_symmetric_output_pdb_and_symmetry_file(StringIO(buffer.str()), StringIO(symmetry_file))
+        pose, symmetry_file_str = self.create_symmetric_pose_from_asymmetric_output(input_file, return_symmetry_file=True)
+        # return self.from_symmetric_output_pdb_and_symmetry_file(StringIO(buffer.str()), StringIO(symmetry_file))
+        with tempfile.TemporaryDirectory() as d:
+            input_file_new = f"{d}/{input_file}"
+            symmetry_file = f"{d}/symdef"
+            with open(symmetry_file, "w") as f:
+                f.write(symmetry_file_str)
+            pose.dump_pdb(input_file_new)
+            return self.from_symmetric_output_pdb_and_symmetry_file(input_file_new, symmetry_file)
 
     def from_symmetric_output_pdb_and_symmetry_file(cls, input_file, symmetry_file):
         """

@@ -10,11 +10,11 @@ def test_prediction_structures():
     from pyrosetta import pose_from_file, Pose
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from cubicsym.setupaligner import SetupAligner
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str, set_all_translations_to_0
     from symmetryhandler.reference_kinematics import get_dofs
     import pandas as pd
-    from simpletestlib.test import setup_pymol
+    from simpletestlib.setup import setup_pymol
     from cubicsym.alphafold.symmetrymapper import SymmetryMapper
     from pathlib import Path
     from shapedesign.src.utilities.score import create_score_from_name
@@ -152,11 +152,11 @@ def test_native_structures():
     from pyrosetta import pose_from_file, Pose
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from cubicsym.setupaligner import SetupAligner
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str, set_all_translations_to_0
     from symmetryhandler.reference_kinematics import get_dofs
     import pandas as pd
-    from simpletestlib.test import setup_pymol
+    from simpletestlib.setup import setup_pymol
     from cubicsym.alphafold.symmetrymapper import SymmetryMapper
     import math
     T_selection = {
@@ -288,7 +288,7 @@ def test_native_structures():
 
 
 def test_different_rotations():
-    from simpletestlib.test import setup_pymol, setup_test
+    from simpletestlib.setup import setup_pymol, setup_test
     from cubicsym.alphafold.symmetrymapper import SymmetryMapper
     from pyrosetta import pose_from_file, init
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str
@@ -323,7 +323,7 @@ def test_different_rotations():
         assert rmsd < 0.1 or rmsd_flip < 0.1
 
 def test_run_recapitulation():
-    from simpletestlib.test import setup_pymol, setup_test
+    from simpletestlib.setup import setup_pymol, setup_test
     from cubicsym.alphafold.symmetrymapper import SymmetryMapper
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str
@@ -425,7 +425,7 @@ def test_run_recapitulation():
                 ...
 
 def test_run():
-    from simpletestlib.test import setup_pymol, setup_test
+    from simpletestlib.setup import setup_pymol, setup_test
     from cubicsym.alphafold.symmetrymapper import SymmetryMapper
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str
@@ -471,7 +471,7 @@ def test_run():
 
 
 def test_apply():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from pyrosetta import pose_from_file, init
     from cubicsym.alphafold.symmetrymapper import SymmetryMapper
     from pathlib import Path

@@ -11,7 +11,7 @@ def test_boundedminmover():
     from cubicsym.actors.cubicboundary import CubicBoundary
     from cubicsym.dofspec import DofSpec
     from pyrosetta.rosetta.core.scoring import ScoreFunctionFactory
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     import math
     from symmetryhandler.reference_kinematics import perturb_jumpdof_str_str
     pose, pmm, cmd, symdef = setup_test(name="I", file="1STM", return_symmetry_file=True, mute=True)

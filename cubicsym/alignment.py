@@ -6,7 +6,7 @@
 """
 import random
 import re
-from Bio.Align.Applications import MafftCommandline
+import subprocess
 from scipy.spatial.distance import cdist
 from typing import Iterable
 from pyrosetta.rosetta.protocols.hybridization import TMalign, partial_align
@@ -119,8 +119,15 @@ def sequence_alignment_on_chain_set(pose1, pose2, chain_set1, chain_set2):
     # 1. get the sequence for all chains and create a fasta file:
     in_file = f"/tmp/{''.join([str(random.randint(0, 9)) for i in range(10)])}.fasta"
     write_fasta_on_chain_set(in_file, pose1, pose2, chain_set1, chain_set2)
-    mafft_cline = MafftCommandline(input=in_file, clustalout=True)  # , thread=1)
-    stdout, stderr = mafft_cline()
+    # Define the command
+    command = ["mafft", "--clustalout", in_file]
+    # this command has been depreciated
+    # mafft_cline = MafftCommandline(input=in_file, clustalout=True)  # , thread=1)
+    # stdout, stderr = mafft_cline()
+    # So i am running subprocess instead
+    result = subprocess.run(command, capture_output=True, text=True)
+    stdout, stderr = result.stdout, result.stderr
+
     new = stdout.split("\n")
     new.pop(0)  # remove header
     new = [i for i in new if i != ""]  # remove all empty elements
@@ -128,7 +135,7 @@ def sequence_alignment_on_chain_set(pose1, pose2, chain_set1, chain_set2):
     stars = ""
     for i in new:
         if i[0] != " ":
-            i = re.split('\s+', i)
+            i = re.split(r'\s+', i)
             idn, string = i[0], i[1]
             if idn in mafft_alignment:
                 mafft_alignment[idn] += string
@@ -181,6 +188,8 @@ def sequence_alignment_on_chain_set(pose1, pose2, chain_set1, chain_set2):
         idx = "2_" + str(chain)
         seq = "".join([pose2.residue(i).name1() for i in correct_alignment_map[idx]])
         unique_sequences.add(seq)
-    assert len(unique_sequences) == 1, f"The sequence alignment does not consists of of identical chains (pose name = {pose1.pdb_info().name()})"
+    assert len(unique_sequences) == 1, f"The sequence alignment does not consists of of identical chains (pose name = {pose1.pdb_info().name()}). " \
+                                       f"This can happen if the crystal structure chain breaks (from unmodelled residues). " \
+                                       f"For a cubic example of this check out PBDID: 4ZOR"
 
     return correct_alignment_map

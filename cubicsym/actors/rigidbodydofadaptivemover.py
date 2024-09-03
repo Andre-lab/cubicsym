@@ -5,8 +5,9 @@ import numpy as np
 class RigidBodyDofAdaptiveMover:
     """Standin for the C++ version of the mover"""
 
-    def __init__(self, name, max_attempts_to_set_pertubation=100):
+    def __init__(self, name, cubicboundary, max_attempts_to_set_pertubation=100):
         self.name = name
+        self.cubicboundary = cubicboundary
         self.jumps = []
         self.dofs = []
         self.param1 = []
@@ -40,12 +41,9 @@ class RigidBodyDofAdaptiveMover:
     def get_initial_placement(self, pose, jumpid, dofid):
         return get_jumpdof_int_int(pose, jumpid, dofid)
 
-    def generate_perturbation(self, param1, param2, min_perturbation=None):
+    def generate_perturbation(self, param1, param2):
         for i in range(self.max_attempts_to_set_pertubation):
             val = np.random.default_rng().normal() * param1 + param2
-            if min_perturbation is not None:
-                if val < min_perturbation:
-                    continue
             return val
         return 0
 
@@ -55,11 +53,11 @@ class RigidBodyDofAdaptiveMover:
                                                                                               self.min_pertubation,
                                                                                               self.limit_movements, self.max, self.min):
             if limit_movement:
-                initial_pertubation = self.get_initial_placement(pose, jumpid, dofid)
+                initial_pertubation = self.cubicboundary.initial_positions_int_int[jumpid][dofid]
                 current_pertubation = get_jumpdof_int_int(pose, jumpid, dofid)
                 diff = current_pertubation - initial_pertubation
                 for i in range(self.max_attempts_to_set_pertubation):
-                    pertubation = self.generate_perturbation(param1, param2, min_pertubation)
+                    pertubation = self.generate_perturbation(param1, param2)
                     diff_plus_pertubation = diff + pertubation
                     if diff_plus_pertubation <= max_ and diff_plus_pertubation >= min_:
                         perturb_jumpdof_int_int(pose, jumpid, dofid, pertubation)

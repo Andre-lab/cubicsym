@@ -8,7 +8,7 @@ Tests for the CubicDof class
 
 def test_cubic_dofs():
     from cubicsym.cubicdofs import CubicDofs
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     pose = setup_test(name="I", file="1STM", pymol=False)
     cd = CubicDofs(pose)
     assert cd.__doforder_str == {'HF': [('JUMPHFfold1', 3),

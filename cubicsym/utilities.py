@@ -192,6 +192,7 @@ def get_chain_map(symmetry_type, is_righthanded):
         else:
             return [(1, 1, 1), (2, 4, 3), (3, 6, 5), (4, 3, 4), (5, 5, 6), (6, 7, 2), (7, 2, 7)] # 1MOG
 
+
 def get_chain_map_as_dict(symmetry_type, is_righthanded):
     """Returns a chain map that maps HF to the other folds."""
     chain_map = get_chain_map(symmetry_type, is_righthanded)
@@ -249,8 +250,8 @@ def copy_pose_id_to_its_bases(pose_w_id, *pose_w_other_bases):
         else:
             for pose in pose_w_other_bases:
                 add_base_to_pose(pose)
-    else:
-        raise ValueError("pose_w_id does not have an id!")
+    # else:
+    #     raise ValueError("pose_w_id does not have an id!")
     # reconstruct with new base and the extracted id
 
 def add_base_to_pose(pose):

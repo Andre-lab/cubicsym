@@ -23,6 +23,123 @@ import importlib
 #         for i in range(10):
 #             randomize_all_dofs(pose)
 #             cs.vrts_overlap_with_pose(pose, update_and_apply_dofs=True)
+
+
+def test_transform_to_full_hf():
+    from cubicsym.cubicsetup import CubicSetup
+    from symmetryhandler.reference_kinematics import set_jumpdof_str_str
+    from simpletestlib.setup import setup_test
+    for pdbid, hand in {'1NQW': False,  '1B5S': True, '6S44': False, '1STM': True}.items():
+        pose, pmm, cmd, symdef = setup_test(name="I", file=pdbid, mute=True, symmetrize=True, reinitialize=False,
+                                              return_symmetry_file=True)
+        cs = CubicSetup(symdef)
+        pose = cs.make_asymmetric_pose(pose)
+        cs_new = cs.add_extra_chains()
+        cs_new.make_symmetric_pose(pose)
+        pose.pdb_info().name("original")
+        pmm.apply(pose)
+
+        pose.pdb_info().name("left")
+        set_jumpdof_str_str(pose, jump="JUMPHFfold1_z", dof="angle_z", value=72)
+        pmm.apply(pose)
+        cs_new.update_dofs_from_pose(pose)
+        cs_new.visualize(ip="10.8.0.18")
+
+        # pose.pdb_info().name("right")
+        # set_jumpdof_str_str(pose, jump="JUMPHFfold1_z", dof="angle_z", value=-72)
+        # pmm.apply(pose)
+
+        print("hello")
+
+def test_transform_to_full_2f():
+    from simpletestlib.setup import setup_test
+    from cubicsym.cubicsetup import CubicSetup
+    from symmetryhandler.reference_kinematics import set_jumpdof_str_str
+    from cubicsym.assembly.cubicassembly import CubicSymmetricAssembly
+    for pdbid, hand in {'1STM': True,  '1NQW': False, '6S44': False, '1B5S': True }.items():
+        pose, pmm, cmd, symdef = setup_test(name="I", file=pdbid, mute=True, symmetrize=True, reinitialize=False,
+                                            return_symmetry_file=True)
+        cs = CubicSetup(symdef)
+        asympose = cs.make_asymmetric_pose(pose)
+
+        # ass = CubicSymmetricAssembly.from_pose_input(pose, cs)
+        # ass.set_server_proxy("http://10.8.0.18:9123")
+        # ass.set_server_root_path("/Users/mads/mounts/mailer")
+        # ass.show()
+
+        cs_hf_based = cs.add_extra_chains()
+        pose = asympose.clone()
+        cs_hf_based.make_symmetric_pose(pose)
+        pose.pdb_info().name("h5_original")
+        pmm.apply(pose)
+        cs_2f_based = cs.create_I_2fold_based_symmetry()
+        pose = asympose.clone()
+        cs_2f_based.make_symmetric_pose(pose)
+
+        # cs_2f_based.update_dofs_from_pose(pose)
+        # cs_2f_based.visualize(ip="10.8.0.22")
+
+        # pose = asympose.clone()
+        # cs_3f_based.make_symmetric_pose(pose)
+        # pose.pdb_info().name("3f_pose")
+        # pmm.apply(pose)
+
+        pose = asympose.clone()
+        cs_2f_based_new = cs_2f_based.add_extra_chains()
+        cs_2f_based_new.make_symmetric_pose(pose)
+        pose.pdb_info().name("h2_original")
+        pmm.apply(pose)
+
+       # lets try to transfer?
+
+        # cs_3f_based_new.update_dofs_from_pose(pose)
+        # cs_3f_based_new.visualize(ip="10.8.0.22")
+
+        print("hello")
+
+
+def test_transform_to_full_f3():
+    from simpletestlib.setup import setup_test
+    from cubicsym.cubicsetup import CubicSetup
+    from symmetryhandler.reference_kinematics import set_jumpdof_str_str
+    from cubicsym.assembly.cubicassembly import CubicSymmetricAssembly
+    for pdbid, hand in {'1NQW': False,  '1B5S': True, '6S44': False, '1STM': True}.items():
+        pose, pmm, cmd, symdef = setup_test(name="I", file=pdbid, mute=True, symmetrize=True, reinitialize=True,
+                                            return_symmetry_file=True)
+        cs = CubicSetup(symdef)
+        asympose = cs.make_asymmetric_pose(pose)
+
+        # ass = CubicSymmetricAssembly.from_pose_input(pose, cs)
+        # ass.set_server_proxy("http://10.8.0.22:9123")
+        # ass.set_server_root_path("/Users/mads/mounts/mailer")
+        # ass.show()
+
+        pose = asympose.clone()
+        cs_hf_based = cs.add_extra_chains()
+        cs_hf_based.make_symmetric_pose(pose)
+        pose.pdb_info().name("h5_original")
+        pmm.apply(pose)
+        cs_3f_based = cs.create_I_3fold_based_symmetry()
+        # pose = asympose.clone()
+        # cs_3f_based.make_symmetric_pose(pose)
+        # pose.pdb_info().name("3f_pose")
+        # pmm.apply(pose)
+
+        pose = asympose.clone()
+        cs_3f_based_new = cs_3f_based.add_extra_chains()
+        cs_3f_based_new.make_symmetric_pose(pose)
+
+        pose.pdb_info().name("h3_original")
+        pmm.apply(pose)
+
+        # lets try to transfer?
+
+
+        # cs_3f_based_new.update_dofs_from_pose(pose)
+        # cs_3f_based_new.visualize(ip="10.8.0.22")
+
+        print("hello")
+
 def cut_monomeric_pose(pose, n_resi, c_resi):
     """Cut a pose with a single chain"""
     # this cuts including the first and last index
@@ -33,7 +150,7 @@ def cut_monomeric_pose(pose, n_resi, c_resi):
     return pose
 
 def test_rmsd_7q03():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.cubicsetup import CubicSetup
     from pyrosetta import pose_from_file
     from cubicsym.private_paths import SYMMETRICAL
@@ -66,7 +183,7 @@ def test_rmsd_7q03():
     print("IS", rmsd, rmsd_other_map)
 
 def test_rmsd():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.cubicsetup import CubicSetup
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str
@@ -146,7 +263,7 @@ def test_rmsd():
 
 
 def test_calculate_if_righthanded_from_pose():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.cubicsetup import CubicSetup
     from cubicsym.actors.symdefswapper import SymDefSwapper
     hands = {'1STM': True, '1B5S': True, '1NQW': False, '6S44': False, '5CVZ': True,
@@ -167,7 +284,7 @@ def test_calculate_if_righthanded_from_pose():
 
 
 def test_show_multiple_symmetries():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.cubicsetup import CubicSetup
     sym_files = {"I": ["1STM", "1B5S", "1NQW", "6S44", "5CVZ"], # hands: {'1STM': True, '1B5S': True, '1NQW': False, '6S44': False, '5CVZ': True}
                  "O": ["5GU1", "3R2R", "1BG7", "1AEW", "1P3Y"], # hands: {'5GU1': True, '3R2R': True, '1BG7': True, '1AEW': True, '1P3Y': False}
@@ -182,7 +299,7 @@ def test_show_multiple_symmetries():
             setup.visualize(ip="10.8.0.6", suffix=f"{file}")
 
 def test_handedness():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.cubicsetup import CubicSetup
     setup = CubicSetup()
     sym_files = {"I": ["1STM", "1B5S", "1NQW", "6S44", "5CVZ"], # hands: {'1STM': True, '1B5S': True, '1NQW': False, '6S44': False, '5CVZ': True}
@@ -198,7 +315,7 @@ def test_handedness():
     print(answer)
 
 def test_get_chains():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.cubicsetup import CubicSetup
     sym_files = {"I": ["1STM", "6S44"],
                  "O": ["1AEW", "1P3Y"],
@@ -222,7 +339,7 @@ def test_get_chains():
     assert True # I have checked that this is consistent!
 
 def test_chain_mapping():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.cubicsetup import CubicSetup
     from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
     from cubicsym.utilities import pose_cas_are_identical, get_chain_map
@@ -251,7 +368,7 @@ def test_chain_mapping():
     assert True # I have checked that this is consistent!
 
 def test_get_chain_names():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.cubicsetup import CubicSetup
     sym_files = {"I": ["1STM", "6S44"],
                  "O": ["1AEW", "1P3Y"],
@@ -301,7 +418,7 @@ def set_all_dofs_to_zero(pose):
 #fixme: change the names to the new ones
 @pytest.mark.skipif(importlib.util.find_spec("simpletestlib") is None, reason="simpletestlib is needed in order to run!")
 def test_create_independent_icosahedral_symmetries():
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.cubicsetup import CubicSetup
     from symmetryhandler.kinematics import perturb_jumpdof
     from pyrosetta import Pose
@@ -361,7 +478,7 @@ def test_create_independent_icosahedral_symmetries():
 def test_new_symmetry_energy_is_the_same():
     from shapedesign.src.utilities.score import create_score_from_name
     from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     import numpy as np
     old_sym = "/tmp/old_symm"
     with open(old_sym, "w") as f:
@@ -482,7 +599,7 @@ def test_rotations_to_2folds():
 
 @pytest.mark.skipif(importlib.util.find_spec("simpletestlib") is None, reason="simpletestlib is needed in order to run!")
 def test_create_O_3fold_based_symmetry():
-    from simpletestlib.test import setup_test, get_test_options
+    from simpletestlib.setup import setup_test, get_test_options
     from cubicsym.cubicsetup import CubicSetup
     pose, pmm, cmd, symm_file = setup_test(name="O", file="7NTN", symmetrize=True, return_symmetry_file=True)
     setup = CubicSetup()
@@ -500,7 +617,7 @@ def test_create_O_3fold_based_symmetry():
 
 @pytest.mark.skipif(importlib.util.find_spec("simpletestlib") is None, reason="simpletestlib is needed in order to run!")
 def test_create_3fold_based_symmetry():
-    from simpletestlib.test import setup_test, get_test_options
+    from simpletestlib.setup import setup_test, get_test_options
     from cubicsym.cubicsetup import CubicSetup
     pose, pmm, cmd, symm_file = setup_test(name="I", file="1STM", symmetrize=True, return_symmetry_file=True)
     setup = CubicSetup()
@@ -517,7 +634,7 @@ def test_create_3fold_based_symmetry():
 
 @pytest.mark.skipif(importlib.util.find_spec("simpletestlib") is None, reason="simpletestlib is needed in order to run!")
 def test_create_O_2fold_based_symmetry():
-    from simpletestlib.test import setup_test, get_test_options
+    from simpletestlib.setup import setup_test, get_test_options
     from cubicsym.cubicsetup import CubicSetup
     for file in ("7NTN",):
         pose, pmm, cmd, symm_file = setup_test(name="O", file=file, symmetrize=True, return_symmetry_file=True)
@@ -536,7 +653,7 @@ def test_create_O_2fold_based_symmetry():
 
 @pytest.mark.skipif(importlib.util.find_spec("simpletestlib") is None, reason="simpletestlib is needed in order to run!")
 def test_create_T_3fold_based_symmetry():
-    from simpletestlib.test import setup_test, get_test_options
+    from simpletestlib.setup import setup_test, get_test_options
     from cubicsym.cubicsetup import CubicSetup
     for file in ("1MOG", "4CIY"):
         pose, pmm, cmd, symm_file = setup_test(name="T", file=file, symmetrize=True, return_symmetry_file=True)
@@ -555,7 +672,7 @@ def test_create_T_3fold_based_symmetry():
 
 @pytest.mark.skipif(importlib.util.find_spec("simpletestlib") is None, reason="simpletestlib is needed in order to run!")
 def test_create_T_2fold_based_symmetry():
-    from simpletestlib.test import setup_test, get_test_options
+    from simpletestlib.setup import setup_test, get_test_options
     from cubicsym.cubicsetup import CubicSetup
     for file in ("4CIY", "1MOG"):
         pose, pmm, cmd, symm_file = setup_test(name="T", file=file, symmetrize=True, return_symmetry_file=True)
@@ -575,7 +692,7 @@ def test_create_T_2fold_based_symmetry():
 
 @pytest.mark.skipif(importlib.util.find_spec("simpletestlib") is None, reason="simpletestlib is needed in order to run!")
 def test_create_2fold_based_symmetry():
-    from simpletestlib.test import setup_test, get_test_options
+    from simpletestlib.setup import setup_test, get_test_options
     from cubicsym.cubicsetup import CubicSetup
     for file in ("6S44", "1STM"):
         pose, pmm, cmd, symm_file = setup_test(name="I", file=file, symmetrize=True, return_symmetry_file=True)
@@ -591,3 +708,36 @@ def test_create_2fold_based_symmetry():
         ss2.make_symmetric_pose(asympose)
         asympose.pdb_info().name("2foldbased")
         pmm.apply(asympose)
+
+def test_vrts_overlap_with_pose():
+    from simpletestlib.test import setup_test
+    from cubicsym.kinematics import randomize_all_dofs
+    from cubicsym.cubicsetup import CubicSetup
+    #for pdb in ("1STM", "6SS4"):
+    #for pdb in ("1AEW", "1P3Y"):
+    for pdb in ("7Q03", "1H0S"):
+        pose, pmm, cmd, symdef = setup_test(name="T", file=pdb, return_symmetry_file=True, mute=True)
+        cs = CubicSetup(symdef)
+        for i in range(10):
+            randomize_all_dofs(pose)
+            cs.vrts_overlap_with_pose(pose, update_and_apply_dofs=True)
+
+            # pmm.apply(pose)
+            # cs.visualize(ip="10.8.0.10")
+
+def test_apply_dofs():
+    """Tests that the dofs follow the pose"""
+    from simpletestlib.test import setup_test
+    from cubicsym.kinematics import randomize_all_dofs
+    from cubicsym.cubicsetup import CubicSetup
+    #for pdb in ("1STM", "6SS4"):
+    #for pdb in ("1AEW", "1P3Y"):
+    for pdb in ("7Q03", "1H0S"):
+        pose, pmm, cmd, symdef = setup_test(name="T", file=pdb, return_symmetry_file=True, mute=True)
+        cs = CubicSetup(symdef)
+        for i in range(10):
+            randomize_all_dofs(pose)
+            cs.vrts_overlap_with_pose(pose, update_and_apply_dofs=True)
+            # cs.update_dofs_from_pose(pose)
+            # pmm.apply(pose)
+            # cs.visualize(ip="10.8.0.6")

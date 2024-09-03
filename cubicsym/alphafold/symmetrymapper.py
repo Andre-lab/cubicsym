@@ -204,7 +204,7 @@ class SymmetryMapper:
 
     def construct_from_symmetry(self, symmetry_file, input_file, cn, symmetry, T3F):
         """Constructs cubic symmetry from cn symmetry file and input file"""
-        ss_cn = SymmetrySetup(file=symmetry_file)
+        ss_cn = SymmetrySetup(symdef=symmetry_file)
         pose_sym = pose_from_file(input_file)
         ss_cn.make_symmetric_pose(pose_sym)
 

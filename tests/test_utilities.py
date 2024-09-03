@@ -6,7 +6,7 @@
 """
 
 def test_right_to_left_mapping():
-    from simpletestlib.test import setup_test, setup_pymol
+    from simpletestlib.setup import setup_test, setup_pymol
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str
     from cubicsym.symdefnormalizer import SymdefNormalizer
     from cubicsym.cubicsetup import CubicSetup
@@ -14,7 +14,7 @@ def test_right_to_left_mapping():
     from pyrosetta import pose_from_file, Pose
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from cubicsym.setupaligner import SetupAligner
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.utilities import pose_cas_are_identical
     from symmetryhandler.reference_kinematics import set_jumpdof_str_str, set_all_translations_to_0
     from symmetryhandler.reference_kinematics import get_dofs
@@ -22,7 +22,7 @@ def test_right_to_left_mapping():
     from pathlib import Path
     import pandas as pd
     import math
-    from simpletestlib.test import setup_pymol
+    from simpletestlib.setup import setup_pymol
     from shapedesign.src.utilities.score import create_score_from_name
     from pyrosetta.rosetta.core.pose.symmetry import extract_asymmetric_unit
     from cubicsym.alphafold.symmetrymapper import SymmetryMapper

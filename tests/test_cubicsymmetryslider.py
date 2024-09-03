@@ -6,12 +6,79 @@ Test of SymmetrySlider
 @Date: 6/7/22
 """
 
+def test_on_full_protection_all():
+    from cubicsym.actors.cubicsymmetryslider import CubicSymmetrySlider
+    from simpletestlib.setup import setup_test
+    from symmetryhandler.reference_kinematics import perturb_jumpdof_str_int
+    from shapedesign.source.visualization.posevisualizer import PoseVisualizer
+    from shapedesign.source.movers.modifychains import ModifyChains
+    from cubicsym.cubicsetup import CubicSetup
+    from shapedesign.source.utilities.pose import add_id_to_pose
+    from cloudcontactscore.cloudcontactscorecontainer import CloudContactScoreContainer
+    import random
+    random.seed(661)
+    for pdbid, hand in { '1STM': True, '1NQW': False,  '1B5S': True, '6S44': False,}.items():
+
+        pose, pmm, cmd, symdef = setup_test("I", file=pdbid, return_symmetry_file=True, mute=True)
+        mc = ModifyChains(CubicSetup(symdef), full=True)
+        mc.make_fully_protected_pose(pose)
+        add_id_to_pose(pose, "0")
+        symdef = mc.full_cubicsetup.make_symmetry_file_on_tmp_disk()
+        pmm.keep_history(True)
+        vis = PoseVisualizer(name="pose", store_scenes=False, store_states=True, representation=["cartoon"], reinitialize=False)
+        # sl = CubicSymmetrySlider(pose, symdef, None, visualizer=vis, trans_mag=1, pymolmover=pmm)
+        ccsc = CloudContactScoreContainer(pose, symdef)
+        sl = CubicSymmetrySlider(pose, symdef, ccsc=ccsc, visualizer=vis)
+
+        for v in [(5, 0, 0, 0, 0, 0), ]:
+
+            # rescue
+            perturb_jumpdof_str_int(pose, "JUMPHFfold1", 3, v[0])
+            perturb_jumpdof_str_int(pose, "JUMPHFfold1_z", 6, v[1])
+            perturb_jumpdof_str_int(pose, "JUMPHFfold111", 1, v[2])
+            perturb_jumpdof_str_int(pose, "JUMPHFfold111_x", 4, v[3])
+            perturb_jumpdof_str_int(pose, "JUMPHFfold111_y", 5, v[4])
+            perturb_jumpdof_str_int(pose, "JUMPHFfold111_z", 6, v[5])
+            sl.apply(pose)
+
+def test_on_full_protection():
+    from cubicsym.actors.cubicsymmetryslider import CubicSymmetrySlider
+    from simpletestlib.setup import setup_test
+    from symmetryhandler.reference_kinematics import perturb_jumpdof_str_int
+    from shapedesign.source.visualization.posevisualizer import PoseVisualizer
+    from shapedesign.source.movers.modifychains import ModifyChains
+    from cubicsym.cubicsetup import CubicSetup
+    from shapedesign.source.utilities.pose import add_id_to_pose
+    from cloudcontactscore.cloudcontactscorecontainer import CloudContactScoreContainer
+    import random
+    random.seed(661)
+    pose, pmm, cmd, symdef = setup_test("I", file="1STM", return_symmetry_file=True, mute=True)
+    mc = ModifyChains(CubicSetup(symdef), full=True)
+    mc.make_fully_protected_pose(pose)
+    add_id_to_pose(pose, "0")
+    symdef = mc.full_cubicsetup.make_symmetry_file_on_tmp_disk()
+    pmm.keep_history(True)
+    vis = PoseVisualizer(name="pose", store_scenes=False, store_states=True, representation=["cartoon"], reinitialize=False)
+    # sl = CubicSymmetrySlider(pose, symdef, None, visualizer=vis, trans_mag=1, pymolmover=pmm)
+    ccsc = CloudContactScoreContainer(pose, symdef)
+    sl = CubicSymmetrySlider(pose, symdef, ccsc=ccsc, visualizer=vis)
+
+    # rescue a 5 fold
+    for i in range(10):
+        perturb_jumpdof_str_int(pose, "JUMPHFfold1", 3, random.uniform(-10, 10))
+        perturb_jumpdof_str_int(pose, "JUMPHFfold1_z", 6, random.uniform(-10, 10))
+        perturb_jumpdof_str_int(pose, "JUMPHFfold111", 1, random.uniform(-10, 10))
+        perturb_jumpdof_str_int(pose, "JUMPHFfold111_x", 4, random.uniform(-10, 10))
+        perturb_jumpdof_str_int(pose, "JUMPHFfold111_y", 5, random.uniform(-10, 10))
+        perturb_jumpdof_str_int(pose, "JUMPHFfold111_z", 6, random.uniform(-10, 10))
+        sl.apply(pose)
+
 def test_slide_all_single_bb():
     from cubicsym.actors.cubicsymmetryslider import CubicSymmetrySlider
     from shapedesign.src.visualization.visualizer import Visualizer
     from cubicsym.cubicsetup import CubicSetup
     from cubicsym.kinematics import randomize_all_dofs_positive_trans, translate_away, randomize_all_dofs, get_dofspecification_for_pose
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from pyrosetta import init
     from symmetryhandler.reference_kinematics import get_jumpdof_str_int, get_dofs, perturb_jumpdof_str_str
     from cloudcontactscore.cloudcontactscorecontainer import CloudContactScoreContainer
@@ -126,7 +193,7 @@ def test_slide_on_T_sym():
     from shapedesign.src.visualization.visualizer import Visualizer
     from cubicsym.actors.symdefswapper import SymDefSwapper
     from pyrosetta.rosetta.core.scoring import CA_rmsd
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     import random
     random.seed(661)
     for pdb in ("1MOG", "1H0S"):
@@ -179,7 +246,7 @@ def test_slide_on_O_sym():
     from pyrosetta.rosetta.core.scoring import CA_rmsd
     from pyrosetta import pose_from_file
     from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     import random
     random.seed(661)
     for pdb in ("1AEW", "1P3Y"):
@@ -273,6 +340,28 @@ def test_multiple_applies():
         perturb_jumpdof(pose, "JUMPHFfold1111", 5, random.uniform(-10, 10))
         perturb_jumpdof(pose, "JUMPHFfold1111", 6, random.uniform(-10, 10))
         sl.apply(pose)
+
+
+def test_failed_shapedesign():
+    from cubicsym.actors.cubicsymmetryslider import CubicSymmetrySlider
+    from simpletestlib.setup import setup_pymol
+    from cubicsym.cubicsetup import CubicSetup
+    from shapedesign.source.visualization.posevisualizer import PoseVisualizer
+    from cloudcontactscore.cloudcontactscorecontainer import CloudContactScoreContainer
+    from shapedesign.source.utilities.pose import add_id_to_pose
+    from pyrosetta import pose_from_file, init
+    path = "/mnt/nasdata/mads/native_shape_actual_designs/run/8E01/339/5/d3ubca__input_aligned_0_predesign.pdb"
+    init(f"-initialize_rigid_body_dofs 1 -pdb_comments")
+    pmm, cmd = setup_pymol(return_cmd=True)
+
+    pose = pose_from_file(path)
+    cs = CubicSetup(pose=pose)
+    cs.make_symmetric_pose(pose)
+    symdef = cs.make_symmetry_file_on_tmp_disk()
+    add_id_to_pose(pose, "3")
+    ccsc = CloudContactScoreContainer(pose, symdef)
+    sl = CubicSymmetrySlider(pose, symdef, ccsc, visualizer=PoseVisualizer(), trans_mag=0.3, pymolmover=pmm)
+    sl.apply(pose)
 
 
 def test_apply_local_slide():

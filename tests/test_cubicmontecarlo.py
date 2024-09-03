@@ -11,7 +11,7 @@ def test_load_many_cubicmontecarlo():
     from cubicsym.cubicsetup import CubicSetup
     from cubicsym.dofspec import DofSpec
     from cloudcontactscore.cloudcontactscore import CloudContactScore
-    from simpletestlib.test import setup_test
+    from simpletestlib.setup import setup_test
     from cubicsym.utilities import add_id_to_pose_w_base
     mcs = []
     pose, pmm, cmd, symdef = setup_test(name="T", file="2CC9", mute=True, return_symmetry_file=True, symmetrize=True)
