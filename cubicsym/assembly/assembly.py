@@ -15,16 +15,10 @@ import numpy as np
 import time
 from pathlib import Path
 from Bio.PDB.MMCIFParser import MMCIFParser
-from Bio.PDB.PDBParser import PDBParser
 from Bio.PDB.MMCIF2Dict import MMCIF2Dict
 from Bio.PDB.mmcifio import MMCIFIO
 from Bio.PDB import PDBIO
-from Bio import SeqIO
-from Bio.PDB.Polypeptide import PPBuilder
-from Bio.SeqRecord import SeqRecord
-from Bio.Align.Applications import MafftCommandline
 from symmetryhandler.mathfunctions import rotation_matrix, vector_angle, vector_projection, rotate, vector_projection_on_subspace
-from cubicsym.mathfunctions import distance
 from string import ascii_lowercase, ascii_uppercase
 from Bio.PDB.Polypeptide import is_aa, index_to_one, three_to_index
 from Bio.PDB.Structure import Structure
