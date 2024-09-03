@@ -14,7 +14,7 @@ setup(
     author_email='mads.jeppesen@biochemistry.lu.se',
     description='Tools for using cubic symmetry with Rosetta and EvoDOCK',
 	install_requires = [
-            "symmetryhandler @ git+https://github.com/Andre-lab/symmetryhandler@903b10a7580522ce118a16002096ea8bc03b63cb",
+            "symmetryhandler @ git+https://github.com/Andre-lab/symmetryhandler",
             "requests",
             "numpy",
             "pandas",
