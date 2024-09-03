@@ -658,7 +658,7 @@ class Assembly(Structure):
     def _write_fasta(self, out, wrap=80):
         with open(out, "w") as f:
             for subunit in self.get_subunits():
-                seq = "".join([index_to_one(three_to_index(i.get_resname()) for i in subunit.get_residues() if is_aa(i, standard=True)])
+                seq = "".join([index_to_one(three_to_index(i.get_resname()) for i in subunit.get_residues() if is_aa(i, standard=True))])
                 f.write(f">{subunit.id}\n")
                 for seq_line in [seq[i:i + wrap] for i in range(0, len(seq), wrap)]:
                     f.write(f"{seq_line}\n")
