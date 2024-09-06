@@ -1160,17 +1160,17 @@ class CubicSetup(SymmetrySetup):
                     vrt_to_copy = copy.deepcopy(cs.get_unapplied_vrt(vrt))
                 else:
                     vrt_to_replace = cs.get_unapplied_vrt(vrt)
-                    vrt_to_replace._vrt_orig = vrt_to_copy._vrt_orig
-                    vrt_to_replace._vrt_x = vrt_to_copy._vrt_x
-                    vrt_to_replace._vrt_y = vrt_to_copy._vrt_y
-                    vrt_to_replace._vrt_z = vrt_to_copy._vrt_z
+                    vrt_to_replace.vrt_orig = vrt_to_copy.vrt_orig
+                    vrt_to_replace.vrt_x = vrt_to_copy.vrt_x
+                    vrt_to_replace.vrt_y = vrt_to_copy.vrt_y
+                    vrt_to_replace.vrt_z = vrt_to_copy.vrt_z
                     if "x_rref" in vrt_to_replace.name:
-                        vrt_to_replace._vrt_orig = self.add_along_vector(vrt_to_replace._vrt_orig, vrt_to_replace._vrt_x)
+                        vrt_to_replace.vrt_orig = self.add_along_vector(vrt_to_replace.vrt_orig, vrt_to_replace.vrt_x)
                     elif "y_rref" in vrt_to_replace.name:
-                        vrt_to_replace._vrt_orig = self.add_along_vector(vrt_to_replace._vrt_orig, vrt_to_replace._vrt_y)
+                        vrt_to_replace.vrt_orig = self.add_along_vector(vrt_to_replace.vrt_orig, vrt_to_replace.vrt_y)
                     elif "z_rref" in vrt_to_replace.name:
-                        vrt_to_replace._vrt_orig = self.add_along_vector(vrt_to_replace._vrt_orig, vrt_to_replace._vrt_z)
-                    cs._init_vrts[cs._init_vrts.index(vrt_to_replace)] = vrt_to_replace
+                        vrt_to_replace.vrt_orig = self.add_along_vector(vrt_to_replace.vrt_orig, vrt_to_replace.vrt_z)
+                    cs.init_vrts[cs.init_vrts.index(vrt_to_replace)] = vrt_to_replace
 
 
     @staticmethod
@@ -2900,7 +2900,6 @@ class CubicSetup(SymmetrySetup):
         if straighten_COM:
             self.straightinator(ss2)
         return ss2
-
 
     def add_extra_chains(self):
         ss = copy.deepcopy(self)
