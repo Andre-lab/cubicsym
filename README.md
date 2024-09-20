@@ -13,7 +13,6 @@ For a standalone install the following must be installed:
 * Python-3.6 or later (PyRosetta dependency). 
 * PyRosetta (http://www.pyrosetta.org) (Can be installed with Anaconda). You need to obtain a license before use (see the link) 
 * MAFFT (https://mafft.cbrc.jp/alignment/software/) (can be installed with Anaconda/brew/apt)
-* mpi4py and its requirements (https://mpi4py.readthedocs.io/en/stable/install.html) (can be install with Anaconda/pip)
 
 Clone the cubicsym repository and ```cd``` into it. Then run the install script.
 ```console

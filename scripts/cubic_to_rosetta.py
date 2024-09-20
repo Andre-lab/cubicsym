@@ -12,19 +12,12 @@ import gzip
 from cubicsym.assembly.cubicassembly import CubicSymmetricAssembly
 from cubicsym.exceptions import ToHighGeometry, ToHighRMSD
 from pathlib import Path
-from cubicsym.utilities import mpi_starmap, write_string_to_bytearray
-from mpi4py import MPI
 from pyrosetta import pose_from_file, init
 from pyrosetta.rosetta.protocols.symmetry import SetupForSymmetryMover
 from symmetryhandler.symmetrysetup import SymmetrySetup
 import pandas as pd
 import sys
 from distutils.util import strtobool
-
-
-comm = MPI.COMM_WORLD
-size = comm.Get_size()
-rank = comm.Get_rank()
 
 def quality_assurance(rosetta_repr, full_repr, input_file, symm_file, pdbid, assembly_id, idealize, output_alignment=False):
     from Bio.PDB.MMCIFParser import MMCIFParser
@@ -230,10 +223,6 @@ The simplest way to run the script is (with s1 being an mmCIF file):
 
 python --structures <s1> --symmetry <target symmetry type>
 
-The script can be used together with openmpi to accept multiple structures (s1, s2 and s3). In that case run as:
-
-mpirun -n <cores> python --structures <s1> <s2> <s3> --symmetry <target symmetry type>
-
 There are 2 modes to use the script: 
 
 1. Automatic way: 
@@ -322,33 +311,15 @@ https://github.com/Andre-lab/cubicsym
     args = parser.parse_args()
 
     # default name handling
-    if rank == 0:
-        args.symdef_names = [n if n != "<prefix>.symm" else f"{Path(s).stem}.symm" for n, s in zip([args.symdef_names] * len(args.structures) if isinstance(args.symdef_names, str) else args.symdef_names, args.structures)]
-        args.input_names = [n if n != "<prefix>.cif" else f"{Path(s).stem}.cif" for n, s in zip([args.input_names] * len(args.structures) if isinstance(args.input_names, str) else args.input_names, args.structures)]
-        args.rosetta_repr_names = [n if n != "<prefix>_rosetta.pdb" else f"{Path(s).stem}_rosetta.pdb" for n, s in zip([args.rosetta_repr_names] * len(args.structures) if isinstance(args.rosetta_repr_names, str) else args.rosetta_repr_names, args.structures)]
-        args.crystal_repr_names = [n if n != "<prefix>_crystal.pdb" else f"{Path(s).stem}_crystal.pdb" for n, s in zip([args.crystal_repr_names] * len(args.structures) if isinstance(args.crystal_repr_names, str) else args.crystal_repr_names, args.structures)]
-        args.full_repr_names = [n if n != "<prefix>_full.cif" else f"{Path(s).stem}_full.cif" for n, s in zip([args.full_repr_names] * len(args.structures) if isinstance(args.full_repr_names, str) else args.full_repr_names, args.structures)]
-        args.symmetry_visualization_names = [n if n != '<prefix>_symmetry_visualization.py' else f"{Path(s).stem}_symmetry_visualization.py" for n, s in zip([args.symmetry_visualization_names] * len(args.structures) if isinstance(args.symmetry_visualization_names, str) else args.symmetry_visualization_names, args.structures)]
-        args.report_names = [n if n != "<prefix>.csv" else f"{Path(s).stem}.csv" for n, s in zip([args.report_names] * len(args.structures) if isinstance(args.report_names, str) else args.report_names, args.structures)]
+    args.symdef_names = [n if n != "<prefix>.symm" else f"{Path(s).stem}.symm" for n, s in zip([args.symdef_names] * len(args.structures) if isinstance(args.symdef_names, str) else args.symdef_names, args.structures)]
+    args.input_names = [n if n != "<prefix>.cif" else f"{Path(s).stem}.cif" for n, s in zip([args.input_names] * len(args.structures) if isinstance(args.input_names, str) else args.input_names, args.structures)]
+    args.rosetta_repr_names = [n if n != "<prefix>_rosetta.pdb" else f"{Path(s).stem}_rosetta.pdb" for n, s in zip([args.rosetta_repr_names] * len(args.structures) if isinstance(args.rosetta_repr_names, str) else args.rosetta_repr_names, args.structures)]
+    args.crystal_repr_names = [n if n != "<prefix>_crystal.pdb" else f"{Path(s).stem}_crystal.pdb" for n, s in zip([args.crystal_repr_names] * len(args.structures) if isinstance(args.crystal_repr_names, str) else args.crystal_repr_names, args.structures)]
+    args.full_repr_names = [n if n != "<prefix>_full.cif" else f"{Path(s).stem}_full.cif" for n, s in zip([args.full_repr_names] * len(args.structures) if isinstance(args.full_repr_names, str) else args.full_repr_names, args.structures)]
+    args.symmetry_visualization_names = [n if n != '<prefix>_symmetry_visualization.py' else f"{Path(s).stem}_symmetry_visualization.py" for n, s in zip([args.symmetry_visualization_names] * len(args.structures) if isinstance(args.symmetry_visualization_names, str) else args.symmetry_visualization_names, args.structures)]
+    args.report_names = [n if n != "<prefix>.csv" else f"{Path(s).stem}.csv" for n, s in zip([args.report_names] * len(args.structures) if isinstance(args.report_names, str) else args.report_names, args.structures)]
 
     # divide the options
-    if rank == 0:
-        args.structures = np.array_split(args.structures, size)
-        args.symdef_names = np.array_split(args.symdef_names, size)
-        args.input_names = np.array_split(args.input_names, size)
-        args.rosetta_repr_names = np.array_split(args.rosetta_repr_names, size)
-        args.crystal_repr_names = np.array_split(args.crystal_repr_names, size)
-        args.full_repr_names = np.array_split(args.full_repr_names, size)
-        args.symmetry_visualization_names = np.array_split(args.symmetry_visualization_names, size)
-        args.report_names = np.array_split(args.report_names, size)
-    args.structures = comm.scatter(args.structures, root=0)
-    args.symdef_names = comm.scatter(args.symdef_names, root=0)
-    args.input_names = comm.scatter(args.input_names, root=0)
-    args.rosetta_repr_names = comm.scatter(args.rosetta_repr_names, root=0)
-    args.crystal_repr_names = comm.scatter(args.crystal_repr_names, root=0)
-    args.full_repr_names = comm.scatter(args.full_repr_names, root=0)
-    args.symmetry_visualization_names = comm.scatter(args.symmetry_visualization_names, root=0)
-    args.report_names = comm.scatter(args.report_names, root=0)
 
     # check foldmap options and create the foldmap
     if (args.hf2 and not args.hf3) or (args.hf3 and not args.hf2):

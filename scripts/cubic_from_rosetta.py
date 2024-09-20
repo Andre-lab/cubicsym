@@ -13,8 +13,6 @@ import pathlib
 import textwrap
 import numpy as np
 import argparse
-from mpi4py import MPI
-comm = MPI.COMM_WORLD
 from argparse import RawDescriptionHelpFormatter
 
 description = textwrap.dedent("""Creates a cubic symmetry file from a Rosetta output file and its symmetry definition file.
@@ -35,9 +33,9 @@ or (i1 being an input file)
 
 python --structures <i1> 
 
-The script can be used together with openmpi to accept multiple structures and symmetry files (r1/s1, r2/s2 and r3/s3):
+multiple runs 
 
-mpirun -n <cores> python --structures <r1> <r2> <r3> --symmetry_files  <s1> <s2> <s3>
+python --structures <r1> <r2> <r3> --symmetry_files  <s1> <s2> <s3>
 
 The order is important. So the structure r1 should match the symmetry file s1 and so on. This also goes for the
 other options (see below).
@@ -68,21 +66,8 @@ def main():
     # assert equal length for all
     assert all(len(l) == len(args.structures) for l in [args.symmetry_files, args.out_names, args.out_dirs])
 
-    # distribute to each core
-    if comm.rank == 0:
-        structures = np.array_split(args.structures, comm.Get_size())
-        out_dirs = np.array_split(args.out_dirs, comm.Get_size())
-        out_names = np.array_split(args.out_names, comm.Get_size())
-        symmetry_files = np.array_split(args.symmetry_files, comm.Get_size())
-    else:
-        structures, out_dirs, out_names, symmetry_files = None, None, None, None
-    structures = comm.scatter(structures, root=0)
-    out_dirs = comm.scatter(out_dirs, root=0)
-    out_names = comm.scatter(out_names, root=0)
-    symmetry_files = comm.scatter(symmetry_files, root=0)
-
     # the actual representation generation
-    for struct, out_dir, out_name, symmdef in zip(structures, out_dirs, out_names, symmetry_files):
+    for struct, out_dir, out_name, symmdef in zip(args.structures, args.out_dirs, args.out_names, args.symmetry_files):
         name = pathlib.Path(out_dir).joinpath(out_name)
         if name.exists():
             if not args.overwrite:
