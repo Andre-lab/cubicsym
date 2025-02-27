@@ -29,7 +29,7 @@ from pyrosetta.rosetta.protocols.scoring import Interface
 from pyrosetta.rosetta.std import map_core_id_AtomID_core_id_AtomID
 from pyrosetta import AtomID
 from symmetryhandler.reference_kinematics import perturb_jumpdof_str_str
-
+import tempfile
 
 class CubicSetup(SymmetrySetup):
 
@@ -37,6 +37,11 @@ class CubicSetup(SymmetrySetup):
         super().__init__(symdef, pose, symmetry_name)
         self.chain_map_str2int = {k: v for k, v in zip(tuple("ABCDEFGHI"), tuple(range(1, 10)))}
         self.extract_headers()
+
+    @classmethod
+    def from_symmetry_setup(cls, ss):
+        file = StringIO(ss.make_symmetry_definition())
+        return cls(file)
 
     def sds_overlaps_with_anchor(self, pose, update_and_apply_dofs=True, atol=1e-1):
         if update_and_apply_dofs:
